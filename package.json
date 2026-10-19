@@ -20,5 +20,8 @@
     "exceljs": "^4.4.0",
     "node-html-parser": "^7.0.1",
     "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.63.0"
   }
 }

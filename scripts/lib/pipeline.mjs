@@ -79,6 +79,7 @@ export function playwrightArgs({ pkg, env, headless = true, outputDir, storageSt
   const origin = new URL(env.uiBaseUrl).origin;
   const args = ["-y", pkg, "--isolated", "--allowed-origins", origin, "--output-dir", outputDir, "--image-responses", "omit"];
   if (headless) args.push("--headless");
+  if (env.browser) args.push("--browser", env.browser);
   if (storageStatePath) args.push("--storage-state", storageStatePath);
   if (initScriptPath) args.push("--init-script", initScriptPath);
   return args;

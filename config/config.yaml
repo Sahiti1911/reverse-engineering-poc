@@ -10,13 +10,25 @@ defaultModule: grid export
 environment: test
 environments:
   test:
-    uiBaseUrl: https://avl-test.example.invalid   # TODO: the AVL test environment URL
+    uiBaseUrl: https://generic-avl-stable.ridango.cloud/
+    browser: msedge                               # chrome | msedge | firefox | webkit (installed browser channel)
     login:
-      # storage-state: log in once with `npm run ui-login -- --env test` (opens a browser, you log in,
-      #                the session is saved to the file below, which is git-ignored under cache/).
+      # storage-state: `npm run ui-login -- --env test` logs in once and saves the session to the file below
+      #                (git-ignored under cache/). Agents get only the session, never the password.
       # none:          the app needs no login.
       method: storage-state
       storageState: cache/avl/ui/test.storage.json
+      # Where ui-login reads the username and password (a .env file kept outside this repo; never copied).
+      # Without it, ui-login opens a browser and you log in by hand.
+      credentials:
+        envFile: ../Ridango-poc/Playwright-automation-poc/.env
+        userVar: TEST_USERNAME
+        passwordVar: TEST_PASSWORD
+      # The login form, by accessible name (as in the Playwright project's LoginPage).
+      form:
+        username: Username
+        password: Password
+        submit: Log in
     # full UI mode (the app may save, submit or delete) is refused unless this is true.
     allowWrites: false
 
