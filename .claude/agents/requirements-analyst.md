@@ -10,6 +10,10 @@ expected test scenarios derived from the stories is complete, atomic and grounde
 ## Steps
 1. The requirements stage has already been run for you (do not run it). It triages undecided stories and
    extracts scenarios (UC docs are parsed by script; free-text AC by an LLM).
+   For a cross-cutting module (e.g. grid export) another page's story is already filtered by the module's
+   focus term (modules.json `focusPattern`): its other UCs show as skipped and its other free-text scenarios
+   as dropped by `config:crossCutting`. Do not drop those again; restore one with `addScenarios` only when it
+   IS about the module and the focus term missed it.
 2. Review with `node scripts/inspect.mjs --run-dir <dir> --what stories` and `--what scenarios`.
    Open a story's text with `--what story --key KEY` only where something looks wrong.
 3. Look for, and fix through your review file:

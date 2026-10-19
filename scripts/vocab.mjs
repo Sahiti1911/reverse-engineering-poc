@@ -15,6 +15,7 @@ import { exportZephyr } from "./lib/zephyr.mjs";
 import { createJiraClient } from "./lib/jira.mjs";
 import { keywordRegex } from "./lib/triage-rules.mjs";
 import { phraseWords, sweepKeywords } from "./lib/discover.mjs";
+import { focusRegex } from "./lib/uc-parser.mjs";
 import { candidatePhrases, scoreKeyword, chooseKeywords, locateModule, dominantFolder, bridgeToCode } from "./lib/vocab.mjs";
 import { readJson, writeJson, slug, promisePool, htmlToText } from "./lib/util.mjs";
 
@@ -98,10 +99,12 @@ const folder = dominantFolder(matchingCases.map((z) => z.folderPath), profile.ze
 let storyCount = 0;
 if (phrases.length) try { storyCount = await jira.count(textJql(phrases)); } catch { /* counted above */ }
 const rovoFit = rovoStories.filter((s) => rx?.test(s.summary ?? ""));
+// Cross-cutting: the core term that keeps another page's export parts and drops the rest of that page.
+const focusRx = located.crossCutting ? focusRegex(null, phrases) : null;
 
 const proposal = {
   path: located.path,
-  ...(located.crossCutting ? { crossCutting: true, codePaths: located.codePaths } : {}),
+  ...(located.crossCutting ? { crossCutting: true, ...(focusRx ? { focusPattern: focusRx.source } : {}), codePaths: located.codePaths } : {}),
   aliases: [a.words],
   keywords: phrases,
   ...(folder ? { zephyrFolder: folder.folder } : {}),
@@ -121,6 +124,7 @@ else {
   if (!bridge.length) console.log("  (no code phrase is both declared in the code and mentioned by these stories)");
   console.log(`\nModule: ${located.crossCutting ? `cross-cutting feature "${located.path}"` : located.path} — ${located.why}`);
   if (located.crossCutting) console.log(`Code paths: ${located.codePaths.join(", ") || "(none)"}`);
+  if (located.crossCutting) console.log(`Focus: ${focusRx ? `/${focusRx.source}/ — other pages' stories keep only the use cases and scenarios matching it` : "(none: the keywords share no word; other pages' UCs are filtered by the keywords only)"}`);
   console.log(`Zephyr: ${matchingCases.length} case(s) match the keywords${folder ? `; most in "${folder.path}" (${folder.cases} of ${folder.of})` : ""}`);
   console.log(`Jira: ~${storyCount} ${profile.jira.storyTypes.join("/")} stories contain a keyword`);
   if (rovoStories.length) console.log(`Rovo: ${rovoFit.length} of ${rovoStories.length} stories contain a chosen keyword (${rovoFit.map((s) => s.key).join(", ") || "none"}); the others stay candidates for the scout`);

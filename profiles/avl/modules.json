@@ -60,6 +60,7 @@
     "grid export": {
       "path": "shared/grid-export",
       "crossCutting": true,
+      "focusPattern": "\\bexport",
       "aliases": [
         "data export",
         "grid data export",

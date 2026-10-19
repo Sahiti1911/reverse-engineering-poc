@@ -137,6 +137,9 @@ Agents: ${CHAIN.map((c) => c.name).join(" → ")}`);
   if (fromIdx === 0) {
     fs.rmSync(path.join(runDir, "handoff"), { recursive: true, force: true });
     fs.rmSync(path.join(runDir, "review"), { recursive: true, force: true });
+  } else {
+    // Resume: the agents that run again write fresh reviews; a stale one would be merged on top of new scenarios.
+    for (const agent of CHAIN.slice(fromIdx).filter((x) => x.review)) fs.rmSync(path.join(runDir, "review", `${agent.review}.json`), { force: true });
   }
   fs.mkdirSync(path.join(runDir, "handoff"), { recursive: true });
   fs.mkdirSync(path.join(runDir, "review"), { recursive: true });

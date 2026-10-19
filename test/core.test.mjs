@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { parseUcDoc, ucDocToScenarios, useCasesMentioning } from "../scripts/lib/uc-parser.mjs";
+import { parseUcDoc, ucDocToScenarios, useCasesMentioning, focusRegex, splitByFocus } from "../scripts/lib/uc-parser.mjs";
 import { triageByRules, deriveModule, detectAcSource, keywordRegex } from "../scripts/lib/triage-rules.mjs";
 import { resolveScope, normalizeExtraStories } from "../scripts/lib/scope.mjs";
 import { summarizeTokens, TokenLog } from "../scripts/lib/tokens.mjs";
@@ -429,8 +429,39 @@ test("cross-cutting module: only the use cases of another page's QA doc that men
   assert.ok(kept.useCases.some((u) => u.id === "UC-04"));
   assert.ok(!kept.useCases.some((u) => u.id === "UC-01"));
   assert.equal(kept.useCases.length + skipped.length, doc.useCases.length);
-  assert.match(skipped.find((x) => x.uc === "UC-01").reasoning, /does not mention "reimport"/);
+  assert.match(skipped.find((x) => x.uc === "UC-01").reasoning, /no step or flow about "reimport"/);
+  assert.ok(skipped.every((x) => x.offTopic));
   assert.deepEqual(useCasesMentioning(doc, null).doc, doc);
+});
+
+test("cross-cutting focus: derived or configured term, UCs kept whole or narrowed, free-text split", () => {
+  const kw = ["grid export", "data export", "export to csv", "export to excel", "csv export", "excel export", "export button", "exportformatter"];
+  assert.equal(focusRegex(null, kw).source, "\\bexport");
+  assert.equal(focusRegex({ focusPattern: "\\bdownload" }, kw).source, "\\bdownload");
+  assert.equal(focusRegex(null, ["route import", "stop list", "driver shift"]), null);
+  assert.equal(focusRegex(null, ["grid export"]), null);
+
+  const uc = (id, title, main, alternatives = [], exceptions = []) => ({ id, title, actor: "", preconditions: [], trigger: "", main, alternatives, exceptions, postconditions: [], notes: "" });
+  const doc = { useCases: [
+    uc("UC-08", "Export the outbox", ["Click Export", "Download the file"]),
+    uc("UC-11", "Permission denial", ["Send button hidden", "Export button hidden"], [{ id: "a", label: "Export", text: "Export with no rights → toast" }]),
+    uc("UC-01", "View a sent message", ["Open the row", "See details"]),
+  ] };
+  const { doc: kept, skipped } = useCasesMentioning(doc, keywordRegex(kw), { storyKey: "AVLN-1", moduleName: '"grid export"', focusRx: focusRegex(null, kw) });
+  assert.deepEqual(kept.useCases.map((u) => u.id), ["UC-08", "UC-11"]);
+  assert.deepEqual(kept.useCases[0].main, ["Click Export", "Download the file"]); // title names it: whole UC
+  assert.deepEqual(kept.useCases[1].main, ["Export button hidden"]);
+  assert.equal(kept.useCases[1].title, "Permission denial (grid export parts)");
+  assert.deepEqual(skipped.map((s) => [s.uc, s.offTopic]), [["UC-01", true]]);
+  // A narrowed UC with no main step left yields only its flows.
+  const flowsOnly = { useCases: [{ ...uc("UC-02", "Filter", ["Pick a value"], [{ id: "a", label: "Export", text: "Export keeps the filter" }]), narrowed: true, main: [] }] };
+  assert.deepEqual(ucDocToScenarios(flowsOnly, { storyKey: "AVLN-1" }).scenarios.map((s) => s.flow), ["alt"]);
+
+  const sc = [{ title: "Export headers carry group prefix", steps: [], expected: "" }, { title: "Clear row", steps: ["Click clear"], expected: "Row kept" }, { title: "Grid columns", steps: ["Open file"], expected: "CSV export matches grid" }];
+  const { keep, drop } = splitByFocus(sc, /\bexport/i);
+  assert.deepEqual(keep.map((e) => e.title), ["Export headers carry group prefix", "Grid columns"]);
+  assert.deepEqual(drop.map((e) => e.title), ["Clear row"]);
+  assert.equal(splitByFocus(sc, null).keep.length, 3);
 });
 
 test("selectCandidates (module scope): the module's Zephyr folder and keyword-named cases are candidates too", () => {

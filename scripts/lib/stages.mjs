@@ -6,7 +6,7 @@ import { ROOT, requireEnv } from "./config.mjs";
 import { normalizeIssue } from "./jira.mjs";
 import { resolveScope } from "./scope.mjs";
 import { triageByRules, deriveModule, keywordRegex } from "./triage-rules.mjs";
-import { parseUcDoc, ucDocToScenarios, useCasesMentioning } from "./uc-parser.mjs";
+import { parseUcDoc, ucDocToScenarios, useCasesMentioning, focusRegex, splitByFocus } from "./uc-parser.mjs";
 import { getSteps, caseUrl } from "./zephyr.mjs";
 import { ensureRepo, collectModuleCode, codeUrl } from "./code.mjs";
 import { selectCandidates, folderCandidates } from "./candidates.mjs";
@@ -172,14 +172,18 @@ export async function requirementsStage(ctx) {
   ctx.step("triage", { in: live.length, out: testable.length, notes: `${testable.length} testable, ${live.filter((r) => r.triage.testable === false).length} not testable, ${live.filter((r) => r.triage.testable === null).length} undecided, ${ctx.stories.length - live.length} dropped by the scout.` });
 
   // Structured UC docs: parsed by script
+  // Cross-cutting module: a story found by keyword (or Rovo) is about some page that uses the feature, so only
+  // its parts about the feature count. Stories listed in includeStories are kept whole.
+  const scope = ctx.state.scope;
+  const moduleName = `"${scope?.moduleConf?.name ?? scope?.moduleFilter}"`;
+  const hostStory = (r) => scope?.moduleConf?.crossCutting && r.story.moduleSource !== "modules.json";
+  const keywordsRx = keywordRegex(scope?.keywords ?? []);
+  const focusRx = focusRegex(scope?.moduleConf, scope?.keywords ?? []);
   const freeText = [];
   for (const r of testable) {
     if (r.triage.acSource === "uc-doc") {
-      // Cross-cutting module: a QA doc found by keyword (or Rovo) is about some page that uses the feature, so
-      // only its use cases that mention the feature count. Docs listed in includeStories are kept whole.
-      const scope = ctx.state.scope;
-      const { doc, skipped: offTopic } = scope?.moduleConf?.crossCutting && r.story.moduleSource !== "modules.json"
-        ? useCasesMentioning(parseUcDoc(r.story.descriptionHtml), keywordRegex(scope?.keywords ?? []), { storyKey: r.story.key, moduleName: `"${scope?.moduleConf?.name ?? scope?.moduleFilter}"` })
+      const { doc, skipped: offTopic } = hostStory(r)
+        ? useCasesMentioning(parseUcDoc(r.story.descriptionHtml), keywordsRx, { storyKey: r.story.key, moduleName, focusRx })
         : { doc: parseUcDoc(r.story.descriptionHtml), skipped: [] };
       const { scenarios, skipped } = ucDocToScenarios(doc, { storyKey: r.story.key, ...profile.jira.ucDoc });
       r.expected.push(...scenarios);
@@ -216,6 +220,17 @@ export async function requirementsStage(ctx) {
       ctx.step("extract-ac", { batch: `batch ${i + 1}/${acBatches.length}`, in: batch.length, errors: err.message.slice(0, 300) });
     }
   });
+  // Free-text scenarios of another page's story: only those naming the feature stay (0 tokens, cache untouched).
+  const focusDrops = [];
+  const rx = focusRx ?? keywordsRx;
+  for (const r of freeText.filter(hostStory)) {
+    const { keep, drop } = splitByFocus(r.expected, rx);
+    if (!drop.length) continue;
+    r.expected = keep;
+    r.droppedScenarios.push(...drop.map((e) => ({ ...e, droppedBy: "config:crossCutting", reasoning: `${e.reasoning} Dropped: not about ${moduleName} (no match for /${rx.source}/); ${r.story.key} covers another page, so only its ${moduleName} scenarios are analysed.` })));
+    focusDrops.push(`${r.story.key} ${drop.length}/${drop.length + keep.length}`);
+  }
+  if (focusDrops.length) ctx.step("cross-cutting-filter", { in: freeText.length, out: freeText.reduce((n, r) => n + r.expected.length, 0), notes: `Scenarios not about ${moduleName} dropped (/${rx.source}/): ${focusDrops.join(", ")}.` });
   ctx.markDone("requirements");
 }
 
@@ -339,7 +354,8 @@ export async function matchStage(ctx) {
       };
     });
     // Skipped UCs (e.g. legacy parity, WCAG) go in as audit-only items so their cases aren't reported as orphans.
-    const audit = r.skippedUcs.map((sk) => ({ id: `${s.key}:${sk.uc}:audit`, title: sk.title, flow: "main", type: "audit", auditOnly: true, steps: [], expected: "" }));
+    // Off-topic UCs of a cross-cutting module's host page are not audited: their cases belong to that page.
+    const audit = r.skippedUcs.filter((sk) => !sk.offTopic).map((sk) => ({ id: `${s.key}:${sk.uc}:audit`, title: sk.title, flow: "main", type: "audit", auditOnly: true, steps: [], expected: "" }));
     const expected = [...r.expected.map((e) => ({ id: e.id, title: e.title, flow: e.flow, type: e.type, steps: e.steps, expected: e.expected })), ...audit];
     const input = { story: { key: s.key, summary: s.summary }, expected, candidates: withSteps };
     try {

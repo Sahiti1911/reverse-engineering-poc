@@ -63,7 +63,7 @@ export function resolveScope(scopeArg, profile, { since, keywords, extraStories 
       // Extra candidates (Rovo) are fetched too, but only when they are stories of this project.
       extra = normalizeExtraStories(extraStories, projectKey);
       if (extra.length) jql = `(${jql}) OR (key in (${extra.map((x) => x.key).join(", ")}) AND ${base})`;
-      moduleConf = { name: conf.name ?? null, crossCutting: !!conf.crossCutting, includeStories: conf.includeStories ?? [], excludeStories: conf.excludeStories ?? [], notes: conf.notes ?? "" };
+      moduleConf = { name: conf.name ?? null, crossCutting: !!conf.crossCutting, focusPattern: conf.focusPattern ?? null,includeStories: conf.includeStories ?? [], excludeStories: conf.excludeStories ?? [], notes: conf.notes ?? "" };
       keywords = kws;
       break;
     }
