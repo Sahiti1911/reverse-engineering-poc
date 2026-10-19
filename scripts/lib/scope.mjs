@@ -18,7 +18,21 @@ export function normalizeKeywords(keywords, modulePath) {
   return list.filter((k) => !seen.has(k.toLowerCase()) && seen.add(k.toLowerCase()));
 }
 
-export function resolveScope(scopeArg, profile, { since, keywords } = {}) {
+/**
+ * Candidate stories found outside the JQL text search (e.g. a Rovo semantic search run by the user's Claude
+ * session): [{ key, summary?, query? }] or "K1,K2". Only keys of the profile's Jira project are kept.
+ */
+export function normalizeExtraStories(extra, projectKey) {
+  const list = Array.isArray(extra) ? extra : String(extra ?? "").split(/[\s,]+/).filter(Boolean);
+  const keyRx = new RegExp(`^${projectKey}-\\d+$`);
+  const seen = new Set();
+  return list
+    .map((x) => (typeof x === "string" ? { key: x } : x))
+    .filter((x) => keyRx.test(x.key ?? "") && !seen.has(x.key) && seen.add(x.key))
+    .map((x) => ({ key: x.key, summary: x.summary ?? "", query: x.query ?? "", source: x.source ?? "rovo" }));
+}
+
+export function resolveScope(scopeArg, profile, { since, keywords, extraStories } = {}) {
   if (!scopeArg) throw new Error(`--scope is required (${KINDS.join(" | ")})`);
   const idx = scopeArg.indexOf(":");
   const kind = idx === -1 ? scopeArg : scopeArg.slice(0, idx);
@@ -31,6 +45,7 @@ export function resolveScope(scopeArg, profile, { since, keywords } = {}) {
   let jql;
   let moduleFilter = null;
   let moduleConf = null;
+  let extra = [];
   switch (kind) {
     case "project": jql = base; break;
     case "epic": jql = `${base} AND parent = ${value}`; break;
@@ -45,7 +60,10 @@ export function resolveScope(scopeArg, profile, { since, keywords } = {}) {
       // Text search narrows the fetch to stories that mention the module (incl. UC docs naming its path).
       jql = conf.jql ?? `${base} AND (${kws.map((k) => `text ~ "\\"${k}\\""`).join(" OR ")})`;
       if (conf.includeStories?.length) jql = `(${jql}) OR key in (${conf.includeStories.join(", ")})`;
-      moduleConf = { name: conf.name ?? null, includeStories: conf.includeStories ?? [], excludeStories: conf.excludeStories ?? [], notes: conf.notes ?? "" };
+      // Extra candidates (Rovo) are fetched too, but only when they are stories of this project.
+      extra = normalizeExtraStories(extraStories, projectKey);
+      if (extra.length) jql = `(${jql}) OR (key in (${extra.map((x) => x.key).join(", ")}) AND ${base})`;
+      moduleConf = { name: conf.name ?? null, crossCutting: !!conf.crossCutting, includeStories: conf.includeStories ?? [], excludeStories: conf.excludeStories ?? [], notes: conf.notes ?? "" };
       keywords = kws;
       break;
     }
@@ -58,5 +76,5 @@ export function resolveScope(scopeArg, profile, { since, keywords } = {}) {
     case "jql": jql = value; break;
   }
   if (since) jql = `(${jql}) AND updated >= "${since}"`;
-  return { kind, value, jql: `${jql} ORDER BY key ASC`, moduleFilter, moduleConf, keywords: kind === "module" ? keywords : [], since: since ?? null, slug: slug(kind === "project" ? "project" : `${kind}-${value}`) + (since ? `-since-${slug(since)}` : "") };
+  return { kind, value, jql: `${jql} ORDER BY key ASC`, moduleFilter, moduleConf, extraStories: extra, keywords: kind === "module" ? keywords : [], since: since ?? null, slug: slug(kind === "project" ? "project" : `${kind}-${value}`) + (since ? `-since-${slug(since)}` : "") };
 }

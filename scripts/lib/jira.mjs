@@ -28,8 +28,16 @@ export function createJiraClient({ baseUrl, email, token }) {
     return issues;
   }
 
+  /** Approximate number of issues for a JQL (one request, no issues fetched). */
+  async function count(jql) {
+    const res = await fetch(base + "/rest/api/3/search/approximate-count", { method: "POST", headers: { Authorization: auth, Accept: "application/json", "Content-Type": "application/json" }, body: JSON.stringify({ jql }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`Jira API ${res.status} for approximate-count: ${JSON.stringify(data).slice(0, 300)}`);
+    return data.count ?? 0;
+  }
+
   const browseUrl = (key) => `${base}/browse/${key}`;
-  return { search, browseUrl, get };
+  return { search, count, browseUrl, get };
 }
 
 export function normalizeIssue(raw) {

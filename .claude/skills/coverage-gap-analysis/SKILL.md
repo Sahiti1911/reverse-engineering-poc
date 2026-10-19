@@ -6,8 +6,12 @@ description: Use when asked to find missing test cases / test coverage gaps for 
 # Coverage gap analysis
 
 ## Which entry point
-- **A module in plain words** ("import job", "conductor"): use the agent chain.
+- **A module or feature in plain words** ("import job", "conductor", "grid data export"): use the agent chain.
   `node scripts/agents.mjs --profile avl --module "<words>"`, or the `/coverage <words>` command.
+  A feature without a folder of its own works too: the code stage sweeps every code root for the module's
+  keywords (preview with `node scripts/code-map.mjs --module "<words>" --keywords "a,b"`, 0 tokens).
+  `/coverage` first runs a Rovo search in the interactive session (headless agents can't) and passes the
+  candidate stories in with `--extra-stories <file>`. The scout confirms or drops them.
 - **A Jira scope** (issue keys, epic, sprint, project, JQL): use the plain pipeline.
   `node scripts/run.mjs --profile avl --scope <scope>`.
 - **A project with no profile**: follow `profiles/_template/README.md` first.

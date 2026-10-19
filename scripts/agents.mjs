@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // Agent chain: six agents with one job each; every agent gets the findings of the ones before it.
-//   node scripts/agents.mjs --module "import job"            (profile defaults to config/run.json; names from modules.json)
+//   node scripts/agents.mjs                                   (module and profile default to config/run.json)
+//   node scripts/agents.mjs --module "import job"            (names from modules.json)
 //   node scripts/agents.mjs --profile avl --module "import job" --from coverage-matcher      (resume latest run)
 //   node scripts/agents.mjs --profile avl --module "conductor" --skip code-analyst --limit 10
+//   node scripts/agents.mjs --module "grid export" --extra-stories runs/avl/rovo/grid-export.json   (Rovo candidates)
 // Each agent runs headless (claude -p --agent <name>) with a tool allowlist, runs its own pipeline stage,
 // may write one review file, and ends with a structured handoff. Tokens of every agent session are
 // logged next to the pipeline tokens (stage "agent:<name>").
@@ -36,7 +38,7 @@ export function allowedTools(agent, rel) {
   // Only the scout runs its stage itself (it chooses the keywords); later stages are run by the orchestrator.
   const stage = agent.stage === "scope" ? ["Bash(node scripts/run.mjs --stage scope *)"] : [];
   const extra = {
-    "module-scout": ["Bash(node scripts/modules.mjs *)", "mcp__zephyr__list_folders"],
+    "module-scout": ["Bash(node scripts/modules.mjs *)", "Bash(node scripts/code-map.mjs *)", "mcp__zephyr__list_folders"],
     "code-analyst": ["Bash(node scripts/code-map.mjs *)"],
     "coverage-matcher": ZEPHYR_READ,
     "test-designer": ["mcp__zephyr__list_folders", "mcp__zephyr__get_test_case"],
@@ -46,7 +48,7 @@ export function allowedTools(agent, rel) {
 
 const DENIED = ["Read(./.env)", "Read(./.env.local)", "Read(./zephyr_mcp/.env)", "Read(./**/.env*)"];
 
-export function buildPrompt({ agent, rel, profile, moduleWords, keywords, limit, previous, configured = null }) {
+export function buildPrompt({ agent, rel, profile, moduleWords, keywords, limit, previous, configured = null, extraStories = null }) {
   const L = [];
   L.push(`Run directory: ${rel}   (use exactly this path in every command)`);
   L.push(`Profile: ${profile.name} (Jira ${profile.jira.projectKey}, Zephyr ${profile.zephyr.projectKey}, folder root "${profile.zephyr.folderRoot}")`);
@@ -63,12 +65,13 @@ export function buildPrompt({ agent, rel, profile, moduleWords, keywords, limit,
   }
   if (keywords) L.push(`Keywords suggested by the user: ${keywords}`);
   if (limit) L.push(`Story limit for this run: ${limit} (pass --limit ${limit} to the scope stage)`);
+  if (extraStories) L.push(`Candidate stories from a Rovo search: ${extraStories} (pass --extra-stories ${extraStories} to the scope stage; they show as module source "rovo" and must be confirmed or dropped by you)`);
   if (agent.review) L.push(`Your review file (optional, only if you change something): ${rel}/review/${agent.review}.json — schema: schema/review/${agent.review}.schema.json`);
   L.push("");
   L.push("Commands you may run:");
   if (agent.name === "module-scout") {
     L.push(`  node scripts/modules.mjs --profile ${profile.name} --find "<words>"`);
-    L.push(`  node scripts/run.mjs --stage scope --run-dir ${rel} --profile ${profile.name} --scope module:<path> --keywords "<k1>,<k2>"${limit ? ` --limit ${limit}` : ""}`);
+    L.push(`  node scripts/run.mjs --stage scope --run-dir ${rel} --profile ${profile.name} --scope module:<path> --keywords "<k1>,<k2>"${limit ? ` --limit ${limit}` : ""}${extraStories ? ` --extra-stories ${extraStories}` : ""}`);
   } else if (agent.stage !== "report") {
     L.push(`  (The ${agent.stage} stage has ALREADY been run for you — do not run it; review its results.)`);
   }
@@ -103,18 +106,20 @@ async function main() {
   const { values: a } = parseArgs({
     options: {
       profile: { type: "string" }, module: { type: "string" }, keywords: { type: "string" }, limit: { type: "string" },
-      "run-dir": { type: "string" }, from: { type: "string" }, until: { type: "string" }, skip: { type: "string" },
+      "extra-stories": { type: "string" }, "run-dir": { type: "string" }, from: { type: "string" }, until: { type: "string" }, skip: { type: "string" },
       help: { type: "boolean", short: "h" },
     },
   });
+  const cfg = loadRunConfig();
+  a.module ??= cfg.defaultModule; // --module overrides config/run.json defaultModule
   if (a.help || !a.module) {
-    console.log(`Usage: node scripts/agents.mjs --profile <name> --module "<plain words>" [--keywords "a,b"] [--limit n]
-         [--from <agent>] [--until <agent>] [--skip <agent,agent>] [--run-dir <dir>]
+    console.log(`Usage: node scripts/agents.mjs [--profile <name>] [--module "<plain words>"] [--keywords "a,b"] [--limit n]
+         [--extra-stories <file|K1,K2>] [--from <agent>] [--until <agent>] [--skip <agent,agent>] [--run-dir <dir>]
+--module defaults to config/run.json defaultModule (${cfg.defaultModule ? `"${cfg.defaultModule}"` : "not set"}).
 Agents: ${CHAIN.map((c) => c.name).join(" → ")}`);
     process.exit(a.help ? 0 : 2);
   }
   loadEnv();
-  const cfg = loadRunConfig();
   const profile = loadProfile(a.profile); // defaults to config/run.json defaultProfile
   const configured = resolveModule(profile, a.module);
   const names = CHAIN.map((c) => c.name);
@@ -176,7 +181,7 @@ Agents: ${CHAIN.map((c) => c.name).join(" → ")}`);
       await runStage(agent.stage);
     }
 
-    const prompt = buildPrompt({ agent, rel, profile, moduleWords: a.module, keywords: a.keywords, limit: a.limit, previous: previousHandoffs(i), configured });
+    const prompt = buildPrompt({ agent, rel, profile, moduleWords: a.module, keywords: a.keywords, limit: a.limit, previous: previousHandoffs(i), configured, extraStories: a["extra-stories"] });
     const model = cfg.agents?.model?.[agent.name] ?? cfg.agents?.model?.default;
     const args = [
       "-p", "--agent", agent.name, "--output-format", "json", "--json-schema", JSON.stringify(handoffSchema),

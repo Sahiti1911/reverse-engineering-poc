@@ -1,5 +1,6 @@
 {
   "defaultProfile": "avl",
+  "defaultModule": "grid export",
   "claude": {
     "bin": "auto",
     "timeoutMs": 900000,
@@ -25,6 +26,7 @@
     "codeBytesPerModule": 300000,
     "candidateCasesPerStory": 40,
     "keywordCandidates": 12,
+    "moduleCandidates": 15,
     "folderCandidates": 15
   },
   "matching": {
@@ -41,7 +43,12 @@
       "maxHits": 3,
       "maxCallers": 150,
       "variantSamples": 3,
-      "extraTokens": []
+      "extraTokens": [],
+      "keywordSweep": {
+        "enabled": true,
+        "maxSeedsPerPhrase": 25,
+        "maxMentions": 60
+      }
     }
   },
   "zephyr": {

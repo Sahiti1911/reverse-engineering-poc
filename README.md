@@ -12,7 +12,8 @@ It works for any Jira + Zephyr Scale + git project: a project is one `profiles/<
 
 ```sh
 npm install
-node scripts/agents.mjs --module "import job"      # profile: config/run.json defaultProfile (avl)
+node scripts/agents.mjs                            # module + profile: config/run.json defaultModule / defaultProfile
+node scripts/agents.mjs --module "conductor"       # override the configured module for one run
 ```
 
 In a Claude Code session, `/coverage import job` does the same thing.
@@ -42,6 +43,7 @@ The output lands in `runs/<profile>/<date>_agents-<module>/`:
 | Option | Effect |
 |---|---|
 | `--keywords "a,b"` | Suggest related words to the scout |
+| `--extra-stories <file|K1,K2>` | Candidate stories found elsewhere (Rovo), JSON `[{key, summary, query}]`. Fetched only if they are stories of the project, marked `rovo`, confirmed or dropped by the scout |
 | `--limit n` | First n stories (trial) |
 | `--from <agent>` | Resume the latest run of this module from that agent (earlier handoffs are reused) |
 | `--until <agent>` | Stop after that agent |
@@ -49,6 +51,49 @@ The output lands in `runs/<profile>/<date>_agents-<module>/`:
 | `--run-dir <dir>` | Use a specific run folder |
 
 To find module names: `node scripts/modules.mjs --find "<words>"`.
+
+### Finding the right keywords: `scripts/vocab.mjs` (0 tokens)
+
+`node scripts/vocab.mjs --words "grid data export" [--rovo runs/avl/rovo/<slug>.json] [--save "<name>"]`
+turns what you mean into the words each source actually uses, and proposes a modules.json entry.
+1. **Candidate phrases** come from Jira story summaries, Zephyr case and folder names, Rovo titles and code
+   type names. Texts that name all your distinctive words anchor the list; phrases never span a separator.
+2. **Each candidate is counted** in code (declaring / mentioning files), Jira (stories) and Zephyr (cases).
+   Phrases found in all three rank first. A phrase that floods any source (e.g. "export") is flagged generic.
+3. **Bridge to the code.** Testers say "grid export", the code says `ExportJobService`. Code phrases are
+   added when enough of the stories found by the chosen keywords mention them (≥ 2 and ≥ 20 %).
+4. **Proposal.** The module path comes from where the users' words are declared in the frontend; if no
+   folder dominates, the feature is `crossCutting` with `codePaths`. The `zephyrFolder` is the folder
+   holding most matching cases. `--save` writes it, merging with an existing entry.
+
+Check: for "import job" it reproduces the hand-written entry (admin/import-job, "import job" + "bundle
+import", folder "Bundle Import"). For "grid data export" it finds "data export", "grid export",
+"export xlsx", bridges to "export job", marks it cross-cutting, and picks "Data Export (grid Export)"
+(88 of 97 matching cases). `/coverage` runs Rovo, then this step, asks you to confirm, then the agents.
+
+In module scope the matcher also compares stories with the cases in the module's `zephyrFolder` and the cases
+whose names contain a keyword (`limits.moduleCandidates`), so existing tests that were never linked are found.
+
+### Features that are not one folder, and the Rovo check
+
+The words don't have to name a folder. A cross-cutting feature such as "grid data export" works the same way:
+- **Code: keyword sweep.** The code stage searches every code root, frontend and backend, for the module's
+  keywords. A file whose name or declared type contains a keyword in order (`GridExportService`,
+  `CsvExportImportHelper` for "csv export") seeds the reference-following discovery. A file that only names
+  a keyword (an identifier, comment or string) goes in as those lines (role `mention`). A phrase that
+  declares in more than `keywordSweep.maxSeedsPerPhrase` files is reported as too generic and only listed.
+  The TS `export` keyword never counts. Preview at 0 tokens:
+  `node scripts/code-map.mjs --module "grid export" --keywords "export job"`.
+- **Stories: Rovo.** JQL finds stories that contain a keyword. Rovo (Atlassian semantic search) also finds
+  stories worded differently. Headless agents can't use claude.ai connectors, so `/coverage` runs up to 3 Rovo
+  searches in your session first, writes `runs/<profile>/rovo/<module>.json` and passes it as
+  `--extra-stories`. Those stories show module source `rovo` in `1_Story_Triage` and the run log, and the
+  scout keeps only the ones really about the feature. Add `--no-rovo` to `/coverage` to skip it.
+- **Cross-cutting features: `"crossCutting": true`** in modules.json. Pages have their own QA docs, and a
+  page's doc may contain one export use case among ten others. With this flag, a story whose QA doc belongs to
+  another page stays in scope when it mentions a keyword, and from any keyword- or Rovo-found UC doc only the
+  use cases that mention a keyword become scenarios. The rest are listed as skipped, with the reason. Stories in
+  `includeStories` keep their whole doc.
 
 ## Module catalogue: `profiles/<profile>/modules.json`
 
@@ -65,6 +110,7 @@ tokens.
       "keywords": ["import job", "tms.admin.importjob"],  // words Jira stories about it contain
       "zephyrFolder": "Bundle Import",                    // where new cases go
       "includeStories": ["AVLN-2398"],                    // always analysed
+      "crossCutting": false,                              // true for a feature used on many pages (grid export)
       "excludeStories": [],                               // never analysed (noise)
       "notes": "anything the agents should know"
     }
@@ -76,7 +122,8 @@ The `//` comments above are only explanation: the real file is plain JSON (see [
 Only `path` is required, and the file is checked against `schema/modules.schema.json`. When you pass extra
 `--keywords`, they are added to the configured ones. `--remember` on a module run saves the keywords it used
 into this file. Modules that are not listed still work: the scout works them out.
-`config/run.json` → `defaultProfile` makes `--profile` optional everywhere.
+`config/run.json` → `defaultProfile` makes `--profile` optional everywhere; `defaultModule` (a name or alias
+from `modules.json`) makes `--module` optional for `agents.mjs`, `code-map.mjs` and `/coverage`.
 
 ## Plain pipeline (no agents)
 
@@ -102,7 +149,7 @@ the module uses, the classes named after the module that use those types, subcla
 extension points (for example one export handler per grid) and the screens that call the module. Widely
 used helpers are skipped. Everything is packed into `limits.codeBytesPerModule`: the engine as full source,
 variants and helpers as digests, callers as usage lines, with an implementation map listing every file and
-why it was included. Tuning lives in `code.discovery` in `config/run.json`; `searchRoots` in the profile
+why it was included. Tuning lives in `code.discovery` in `config/run.json` (`keywordSweep` for the sweep above); `searchRoots` in the profile
 adds code the discovery may follow into (shared services, other backend modules). Preview what would be
 sent, at 0 tokens:
 

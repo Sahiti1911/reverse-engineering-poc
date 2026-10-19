@@ -26,6 +26,8 @@ Scopes: project | epic:KEY | sprint:active | sprint:<name> | module:<path> | iss
 Options:
   --keywords "a,b"               module scope: related words (stories mentioning them belong to the module)
   --remember                     save the keywords into the profile for next time
+  --extra-stories <file|K1,K2>   module scope: candidate stories found elsewhere (e.g. Rovo search, JSON
+                                 [{key, summary, query}]); added for the scout to confirm, not keyword-matched
   --since <YYYY-MM-DD|last-run>  only stories updated since then
   --limit <n>                    first n stories of the scope (trial runs)
   --concurrency <n>              parallel Claude calls (default config/run.json)
@@ -38,7 +40,7 @@ Options:
 const { values: args } = parseArgs({
   options: {
     profile: { type: "string" }, scope: { type: "string" }, since: { type: "string" }, limit: { type: "string" },
-    keywords: { type: "string" }, remember: { type: "boolean" }, stage: { type: "string" }, "run-dir": { type: "string" },
+    keywords: { type: "string" }, remember: { type: "boolean" }, "extra-stories": { type: "string" }, stage: { type: "string" }, "run-dir": { type: "string" },
     module: { type: "string" },
     concurrency: { type: "string" }, "no-code": { type: "boolean" }, "refresh-zephyr": { type: "boolean" },
     force: { type: "boolean" }, "dry-run": { type: "boolean" }, out: { type: "string" },
@@ -70,6 +72,15 @@ function sinceArg(profileName) {
   return since;
 }
 
+/** --extra-stories: a JSON file ([{key, summary, query}] or {stories: [...]}) or a list of keys. */
+function extraStoriesArg() {
+  const v = args["extra-stories"];
+  if (!v) return undefined;
+  if (!fs.existsSync(v)) return v;
+  const json = readJson(path.resolve(v));
+  return Array.isArray(json) ? json : json.stories ?? [];
+}
+
 function newRunDir(profileName) {
   const profile = loadProfile(profileName);
   const scope = resolveScope(args.scope, profile, { since: sinceArg(profileName), keywords: args.keywords });
@@ -97,7 +108,7 @@ try {
     if (args.stage === "scope") {
       if (!args.profile || !args.scope) throw new Error("--stage scope needs --profile and --scope");
       ctx = RunContext.create({ runDir, profileName: args.profile, opts });
-      await STAGE_FUNCS.scope(ctx, { scopeArg: args.scope, since: sinceArg(args.profile), keywords: args.keywords, limit: args.limit, remember: args.remember });
+      await STAGE_FUNCS.scope(ctx, { scopeArg: args.scope, since: sinceArg(args.profile), keywords: args.keywords, extraStories: extraStoriesArg(), limit: args.limit, remember: args.remember });
     } else {
       ctx = RunContext.load(runDir, opts);
       const missing = STAGES.slice(0, STAGES.indexOf(args.stage)).filter((s) => !ctx.state.stagesDone.includes(s));
@@ -120,7 +131,7 @@ try {
     fs.mkdirSync(runDir, { recursive: true });
     const ctx = RunContext.create({ runDir, profileName: args.profile, opts });
     ctx.log(`Profile ${args.profile} | scope ${args.scope} | run folder ${path.relative(ROOT, runDir)}`);
-    await STAGE_FUNCS.scope(ctx, { scopeArg: args.scope, since: sinceArg(args.profile), keywords: args.keywords, limit: args.limit, remember: args.remember });
+    await STAGE_FUNCS.scope(ctx, { scopeArg: args.scope, since: sinceArg(args.profile), keywords: args.keywords, extraStories: extraStoriesArg(), limit: args.limit, remember: args.remember });
     ctx.save();
     if (!ctx.stories.length) {
       console.log("No stories in scope — nothing to analyse.");

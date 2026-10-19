@@ -5,8 +5,8 @@ import path from "node:path";
 import { ROOT, requireEnv } from "./config.mjs";
 import { normalizeIssue } from "./jira.mjs";
 import { resolveScope } from "./scope.mjs";
-import { triageByRules, deriveModule } from "./triage-rules.mjs";
-import { parseUcDoc, ucDocToScenarios } from "./uc-parser.mjs";
+import { triageByRules, deriveModule, keywordRegex } from "./triage-rules.mjs";
+import { parseUcDoc, ucDocToScenarios, useCasesMentioning } from "./uc-parser.mjs";
 import { getSteps, caseUrl } from "./zephyr.mjs";
 import { ensureRepo, collectModuleCode, codeUrl } from "./code.mjs";
 import { selectCandidates, folderCandidates } from "./candidates.mjs";
@@ -21,10 +21,10 @@ const blankResult = (story, triage) => ({
 });
 
 // ---------------------------------------------------------------- 1. scope
-export async function scopeStage(ctx, { scopeArg, since, keywords, limit, remember }) {
+export async function scopeStage(ctx, { scopeArg, since, keywords, extraStories, limit, remember }) {
   const { profile } = ctx;
   requireEnv("ATLASSIAN_EMAIL", "ATLASSIAN_API_TOKEN", "ZEPHYR_API_TOKEN");
-  const scope = resolveScope(scopeArg, profile, { since, keywords });
+  const scope = resolveScope(scopeArg, profile, { since, keywords, extraStories });
   ctx.state.scope = scope;
   ctx.step("scope", { notes: `JQL: ${scope.jql}${scope.moduleFilter ? ` | module: ${scope.moduleFilter} | keywords: ${scope.keywords.join(", ")}` : ""}${ctx.dryRun ? " | DRY RUN" : ""}` });
 
@@ -42,6 +42,32 @@ export async function scopeStage(ctx, { scopeArg, since, keywords, limit, rememb
       Object.assign(s, { module: scope.moduleFilter, moduleSource: "modules.json", featurePath: scope.moduleFilter, moduleReason: "listed in includeStories" });
     }
   }
+  // Rovo candidates the keywords did not assign: in scope for the scout to confirm or drop.
+  const extraByKey = new Map((scope.extraStories ?? []).map((x) => [x.key, x]));
+  const extraAdded = [];
+  for (const s of stories.filter((x) => extraByKey.has(x.key) && x.module !== scope.moduleFilter && x.moduleSource !== "featurePath")) {
+    const x = extraByKey.get(s.key);
+    Object.assign(s, { module: scope.moduleFilter, moduleSource: x.source, featurePath: scope.moduleFilter, moduleReason: `found by ${x.source} search${x.query ? ` "${x.query}"` : ""}, no keyword match; candidate for the scout to confirm` });
+    extraAdded.push(s.key);
+  }
+  if (extraByKey.size) {
+    const fetchedKeys = new Set(stories.map((s) => s.key));
+    const byKeyword = [...extraByKey.keys()].filter((k) => fetchedKeys.has(k) && !extraAdded.includes(k));
+    const notStories = [...extraByKey.keys()].filter((k) => !fetchedKeys.has(k));
+    ctx.step("extra-stories", {
+      in: extraByKey.size, out: extraAdded.length,
+      notes: `${extraByKey.size} candidate(s) from ${[...new Set([...extraByKey.values()].map((x) => x.source))].join("/")}: ${extraAdded.length} added (${extraAdded.join(", ") || "none"}), ${byKeyword.length} already found by the keywords.`,
+      skipped: notStories.length ? `Not a ${profile.jira.storyTypes.join("/")} of ${profile.jira.projectKey} (or not visible): ${notStories.join(", ")}` : "",
+    });
+  }
+  // Cross-cutting feature: a QA doc of another page that mentions it is in scope (only its matching UCs count).
+  if (conf?.crossCutting) {
+    const rx = keywordRegex(scope.keywords);
+    for (const s of stories.filter((x) => x.moduleSource === "featurePath" && x.featurePath !== scope.moduleFilter)) {
+      const hit = rx && (s.summary.match(rx) ?? s.descriptionText.match(rx));
+      if (hit) Object.assign(s, { module: scope.moduleFilter, moduleSource: "keywords", featurePath: scope.moduleFilter, hostModule: s.featurePath, keywordHit: hit[0], moduleReason: `QA doc of ${s.featurePath} mentions "${hit[0]}" (cross-cutting module: only its matching use cases are analysed)` });
+    }
+  }
   if (scope.moduleFilter) {
     const out = stories.filter((s) => s.module !== scope.moduleFilter);
     stories = stories.filter((s) => s.module === scope.moduleFilter);
@@ -54,7 +80,7 @@ export async function scopeStage(ctx, { scopeArg, since, keywords, limit, rememb
     }
   }
   if (limit) stories = stories.slice(0, Number(limit));
-  for (const s of stories.filter((x) => x.moduleSource === "keywords")) s.moduleReason = `assigned via keyword "${s.keywordHit}"`;
+  for (const s of stories.filter((x) => x.moduleSource === "keywords" && !x.hostModule)) s.moduleReason = `assigned via keyword "${s.keywordHit}"`;
   ctx.state.stories = stories.map((s) => blankResult(s, triageByRules(s, profile)));
   const excluded = [];
   for (const r of ctx.stories.filter((x) => conf?.excludeStories?.includes(x.story.key))) {
@@ -149,9 +175,15 @@ export async function requirementsStage(ctx) {
   const freeText = [];
   for (const r of testable) {
     if (r.triage.acSource === "uc-doc") {
-      const { scenarios, skipped } = ucDocToScenarios(parseUcDoc(r.story.descriptionHtml), { storyKey: r.story.key, ...profile.jira.ucDoc });
+      // Cross-cutting module: a QA doc found by keyword (or Rovo) is about some page that uses the feature, so
+      // only its use cases that mention the feature count. Docs listed in includeStories are kept whole.
+      const scope = ctx.state.scope;
+      const { doc, skipped: offTopic } = scope?.moduleConf?.crossCutting && r.story.moduleSource !== "modules.json"
+        ? useCasesMentioning(parseUcDoc(r.story.descriptionHtml), keywordRegex(scope?.keywords ?? []), { storyKey: r.story.key, moduleName: `"${scope?.moduleConf?.name ?? scope?.moduleFilter}"` })
+        : { doc: parseUcDoc(r.story.descriptionHtml), skipped: [] };
+      const { scenarios, skipped } = ucDocToScenarios(doc, { storyKey: r.story.key, ...profile.jira.ucDoc });
       r.expected.push(...scenarios);
-      r.skippedUcs = skipped;
+      r.skippedUcs = [...skipped, ...offTopic];
     } else {
       freeText.push(r);
     }
@@ -214,7 +246,9 @@ export async function codeStage(ctx) {
     const files = [];
     const notes = [];
     for (const { repo, info } of repoInfos.values()) {
-      const c = collectModuleCode({ repo, repoInfo: info, featurePath, limits: cfg.limits, discovery: cfg.code.discovery, hints: group.map((r) => r.story.summary) });
+      // The scope's keywords drive the sweep for the analysed module only; stories of other modules keep folder discovery.
+      const keywords = featurePath === ctx.state.scope?.moduleFilter ? ctx.state.scope.keywords ?? [] : [];
+      const c = collectModuleCode({ repo, repoInfo: info, featurePath, codePaths: profile.modules?.[featurePath]?.codePaths, keywords, limits: cfg.limits, discovery: cfg.code.discovery, hints: group.map((r) => r.story.summary) });
       files.push(...c.files.map((f) => ({ ...f, repo: repo.name })));
       notes.push(...c.notes);
     }
@@ -275,11 +309,14 @@ export async function matchStage(ctx) {
   for (const r of ctx.stories) Object.assign(r, { candidates: [], matches: [], auditMatches: [], orphans: [] });
   const zephyr = await ctx.zephyr();
   const autoAccept = cfg.matching.autoAcceptConfidence ?? ["High"];
+  // Module scope: the module's Zephyr folder and keywords point to its existing tests (linked or not).
+  const scope = ctx.state.scope;
+  const moduleHint = scope?.moduleFilter ? { path: scope.moduleFilter, zephyrFolder: profile.modules?.[scope.moduleFilter]?.zephyrFolder, rx: keywordRegex(scope.keywords ?? []) } : null;
 
   await promisePool(ctx.testable(), ctx.concurrency, async (r) => {
     const s = r.story;
     if (!r.expected.length) return;
-    r.candidates = selectCandidates({ story: s, zephyr, expected: r.expected, limits: cfg.limits });
+    r.candidates = selectCandidates({ story: s, zephyr, expected: r.expected, limits: cfg.limits, module: s.module === moduleHint?.path ? moduleHint : null });
     if (!r.candidates.length) {
       r.matches = r.expected.map((e) => ({
         expectedId: e.id, verdict: "Missing", matchedKeys: [], confidence: "High", missingAspects: "", autoAccepted: false, decidedBy: "rule",

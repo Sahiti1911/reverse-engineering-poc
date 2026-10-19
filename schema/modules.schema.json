@@ -15,6 +15,8 @@
         "additionalProperties": false,
         "properties": {
           "path": { "type": "string", "description": "Code module path under the frontend root, e.g. admin/import-job (see: node scripts/modules.mjs)." },
+          "codePaths": { "type": "array", "items": { "type": "string" }, "description": "Repo-relative folders or files that are this module's own code, read in addition to <frontendRoot>/<path>. Use for shared features that live outside the feature folders (e.g. the grid export service). With codePaths, <path> may be a name that has no folder." },
+          "crossCutting": { "type": "boolean", "description": "A feature used on many pages (e.g. grid export). Stories whose QA doc belongs to another page are kept when they mention a keyword, and only the use cases of that doc that mention a keyword are analysed." },
           "aliases": { "type": "array", "items": { "type": "string" }, "description": "Other names that should pick this module, e.g. \"bundle import\"." },
           "keywords": { "type": "array", "items": { "type": "string" }, "description": "Words that Jira stories about this module contain. Used for the Jira search and to assign stories to the module. Avoid words that also name customers/projects." },
           "zephyrFolder": { "type": "string", "description": "Folder path (or part of it) where new test cases for this module belong, e.g. \"Bundle Import\"." },

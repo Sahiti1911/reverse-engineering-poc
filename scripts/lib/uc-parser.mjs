@@ -147,8 +147,11 @@ export function ucDocToScenarios(doc, { storyKey, skipTitlePattern, consolidateT
       reasoning: `Main success scenario of ${ref} (${uc.main.length} steps), parsed deterministically from the structured UC doc. Main flows are High priority by convention.`,
     });
     for (const [flow, list, label] of [["alt", uc.alternatives, "alternative flow"], ["exception", uc.exceptions, "exception flow"]]) {
-      for (const item of list) {
-        const fid = item.id || String(list.indexOf(item) + 1);
+      for (const raw of list) {
+        // Some docs write the flow as plain text; "—" / "None" (with a remark) means there is no such flow.
+        if (typeof raw === "string" && /^\s*(—|-|–|none\b|n\/a\b)/i.test(raw)) continue;
+        const item = typeof raw === "string" ? { id: "", label: "", text: raw } : raw;
+        const fid = item.id || String(list.indexOf(raw) + 1);
         scenarios.push({
           ...base,
           id: `${storyKey}:${uc.id}:${flow}-${fid}`,
@@ -165,4 +168,20 @@ export function ucDocToScenarios(doc, { storyKey, skipTitlePattern, consolidateT
     }
   }
   return { scenarios, skipped };
+}
+
+/**
+ * Cross-cutting module (e.g. grid export): another page's QA doc covers the whole page, so keep only the use
+ * cases whose text matches the module's keyword regex. The others are returned as skipped, with the reason.
+ */
+export function useCasesMentioning(doc, rx, { storyKey, moduleName = "this module" } = {}) {
+  if (!doc || !rx) return { doc, skipped: [] };
+  const text = (v) => (Array.isArray(v) ? v.map(text).join("\n") : v && typeof v === "object" ? Object.values(v).map(text).join("\n") : String(v ?? ""));
+  const useCases = [];
+  const skipped = [];
+  for (const uc of doc.useCases ?? []) {
+    if (rx.test(text(uc))) useCases.push(uc);
+    else skipped.push({ storyKey, uc: uc.id, title: uc.title, reasoning: `${uc.id} "${uc.title}" does not mention ${moduleName}; this QA doc is about another page, so only its ${moduleName} use cases are analysed.` });
+  }
+  return { doc: { ...doc, useCases }, skipped };
 }

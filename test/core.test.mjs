@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { parseUcDoc, ucDocToScenarios } from "../scripts/lib/uc-parser.mjs";
+import { parseUcDoc, ucDocToScenarios, useCasesMentioning } from "../scripts/lib/uc-parser.mjs";
 import { triageByRules, deriveModule, detectAcSource, keywordRegex } from "../scripts/lib/triage-rules.mjs";
-import { resolveScope } from "../scripts/lib/scope.mjs";
+import { resolveScope, normalizeExtraStories } from "../scripts/lib/scope.mjs";
 import { summarizeTokens, TokenLog } from "../scripts/lib/tokens.mjs";
 import { findModules } from "../scripts/modules.mjs";
 import { CHAIN, allowedTools, buildPrompt } from "../scripts/agents.mjs";
@@ -14,10 +14,11 @@ import { applyRequirementsReview, applyCodeReview, applyMatchReview, applyScoutR
 import { renderSummary } from "../scripts/lib/report.mjs";
 import { formatSteps, parseSteps, buildWorkbook, readGapSheet } from "../scripts/lib/workbook.mjs";
 import { selectCandidates } from "../scripts/lib/candidates.mjs";
+import { segments, candidatePhrases, scoreKeyword, chooseKeywords, bridgeToCode, locateModule, dominantFolder } from "../scripts/lib/vocab.mjs";
 import { loadProfile, resolveModule, loadModulesCatalog } from "../scripts/lib/config.mjs";
 import { htmlToText, hash } from "../scripts/lib/util.mjs";
 import { compactSource } from "../scripts/lib/code.mjs";
-import { parseSource, buildIndex, moduleTokens, nameMatches, discoverImplementation, digestSource, usageSnippet, packWithinBudget } from "../scripts/lib/discover.mjs";
+import { parseSource, buildIndex, moduleTokens, nameMatches, discoverImplementation, digestSource, usageSnippet, packWithinBudget, phraseWords, wordsMatch, keywordHits, sweepKeywords, mentionSnippet } from "../scripts/lib/discover.mjs";
 
 const profile = loadProfile("avl");
 const html = fs.readFileSync(new URL("./fixtures/AVLN-2398.rendered.html", import.meta.url), "utf8");
@@ -382,4 +383,99 @@ test("packWithinBudget gives full source by priority, digests the rest and never
   assert.deepEqual(files.map((f) => `${f.path}:${f.form}`), ["engine:full", "variant:digest", "caller:usage"]);
   assert.deepEqual(dropped, ["helper"]);
   assert.equal(used, 70);
+});
+
+test("phraseWords and wordsMatch: ordered, adjacent words; compound one-word phrases", () => {
+  assert.deepEqual(phraseWords("Export to CSV"), ["export", "csv"]);
+  assert.deepEqual(phraseWords("ExportJobServices"), ["export", "job", "service"]);
+  assert.ok(wordsMatch(phraseWords("data export"), phraseWords("DataExportJob")));
+  assert.ok(!wordsMatch(phraseWords("data export"), phraseWords("GtfsExportData")));
+  assert.ok(!wordsMatch(phraseWords("data export"), phraseWords("ExportAdminDataSession")));
+  assert.ok(wordsMatch(phraseWords("importjob"), phraseWords("ImportJobService")));
+  assert.ok(!wordsMatch(phraseWords("job"), phraseWords("ImportJobService").slice(0, 1)));
+});
+
+test("keyword sweep: declarations seed, mentions are listed, TS export keyword and generic phrases do not count", () => {
+  const files = [
+    { path: "app/services/export/grid-export.service.ts", content: "export class GridExportService { run() {} }" },
+    { path: "app/pages/user-page.ts", content: ["export class UserPage {", "  // grid export of the user list", "  onExport() { this.gridExportService.run(); }", "}"].join("\n") },
+    { path: "app/pages/job-page.ts", content: "export class JobPage { load() {} }" },
+    ...["A", "B", "C", "D"].map((x) => ({ path: `gen/Thing${x}.java`, content: `class DataExport${x} {}` })),
+  ];
+  assert.deepEqual(keywordHits(files[2].path, files[2].content, ["export job"]), []);
+  const res = sweepKeywords(files, ["grid export", "data export"], { maxSeedsPerPhrase: 3 });
+  assert.deepEqual(res.seeds.map((s) => s.path), ["app/services/export/grid-export.service.ts"]);
+  const user = res.mentions.find((m) => m.path === "app/pages/user-page.ts");
+  assert.deepEqual(user.phrases, ["grid export"]);
+  assert.equal(user.count, 2); // the gridExportService identifier and the comment
+  assert.deepEqual(res.generic.map((g) => g.phrase), ["data export"]);
+  assert.equal(res.mentions.filter((m) => m.path.startsWith("gen/")).length, 4, "files of a too-generic phrase stay listed as mentions");
+  const snip = mentionSnippet(files[1].content, ["grid export"]);
+  assert.match(snip, /gridExportService\.run/);
+  assert.match(snip, /grid export of the user list/);
+});
+
+test("extra stories (Rovo): project keys only, de-duplicated, fetched only as stories of the project", () => {
+  assert.deepEqual(normalizeExtraStories([{ key: "AVLN-4695", query: "grid export" }, "QA-43", "AVLN-4695", "bad"], "AVLN").map((x) => [x.key, x.source, x.query]), [["AVLN-4695", "rovo", "grid export"]]);
+  assert.deepEqual(normalizeExtraStories("AVLN-1, AVLN-2", "AVLN").map((x) => x.key), ["AVLN-1", "AVLN-2"]);
+  const scope = resolveScope("module:admin/import-job", profile, { extraStories: [{ key: "AVLN-4695" }] });
+  assert.ok(scope.jql.includes('OR (key in (AVLN-4695) AND project = AVLN AND issuetype in ("Story"))'));
+  assert.equal(scope.extraStories.length, 1);
+});
+
+test("cross-cutting module: only the use cases of another page's QA doc that mention a keyword are kept", () => {
+  const doc = parseUcDoc(html);
+  const { doc: kept, skipped } = useCasesMentioning(doc, keywordRegex(["reimport"]), { storyKey: "AVLN-2398", moduleName: '"reimport"' });
+  assert.ok(kept.useCases.some((u) => u.id === "UC-04"));
+  assert.ok(!kept.useCases.some((u) => u.id === "UC-01"));
+  assert.equal(kept.useCases.length + skipped.length, doc.useCases.length);
+  assert.match(skipped.find((x) => x.uc === "UC-01").reasoning, /does not mention "reimport"/);
+  assert.deepEqual(useCasesMentioning(doc, null).doc, doc);
+});
+
+test("selectCandidates (module scope): the module's Zephyr folder and keyword-named cases are candidates too", () => {
+  const cases = [
+    { key: "QA-T7", name: "Export XLSX - Users grid", folderId: 3, folderPath: "Ridango > AVL > Data Export (grid Export)", issueIds: [] },
+    { key: "QA-T8", name: "Grid export of the alarm list", folderId: 4, folderPath: "Ridango > AVL > Alarms", issueIds: [] },
+    { key: "QA-T9", name: "Schedule paging" /* in the folder, shares no word with the story */, folderId: 3, folderPath: "Ridango > AVL > Data Export (grid Export)", issueIds: [] },
+  ];
+  const zephyr = { byKey: new Map(cases.map((c) => [c.key, c])), inScopeCases: cases, issueIndex: new Map() };
+  const args = { story: story({ id: 2, summary: "Users list export", module: "grid-export" }), zephyr, expected: [{ title: "Export users to XLSX" }], limits: { candidateCasesPerStory: 10, keywordCandidates: 0, moduleCandidates: 5 } }; // word overlap off: module step only
+  assert.deepEqual(selectCandidates(args).map((c) => c.key), []);
+  const got = selectCandidates({ ...args, module: { zephyrFolder: "Data Export (grid Export)", rx: keywordRegex(["grid export"]) } });
+  assert.deepEqual(got.map((c) => c.key).sort(), ["QA-T7", "QA-T8"]);
+  assert.match(got.find((c) => c.key === "QA-T7").why, /module's Zephyr folder/);
+  assert.match(got.find((c) => c.key === "QA-T8").why, /name contains a module keyword/);
+});
+
+test("keyword triangulation: candidates, scoring, choice, code bridge, location and Zephyr folder", () => {
+  assert.deepEqual(segments("Export XLSX — Historical > Drives"), ["Export XLSX", "Historical", "Drives"]);
+  const texts = ["Data Export (grid Export) - Export XLSX - Users", "Data Export (grid Export) - Export XLSX - Alarms", "grid export button disabled", "Grid column order"];
+  const cands = candidatePhrases("grid data export", texts).map((c) => c.phrase);
+  assert.equal(cands[0], "grid data export", "the user's own phrase is always first");
+  assert.ok(cands.includes("grid export") && cands.includes("export xlsx"));
+  assert.ok(!cands.includes("grid column"), "texts naming all distinctive words anchor the candidates");
+  assert.ok(!cands.some((c) => c.includes("xlsx users")), "phrases never span a separator");
+
+  const scored = [
+    scoreKeyword({ phrase: "grid export", codeDeclares: 0, codeMentions: 1, jira: 3, zephyr: 88 }),
+    scoreKeyword({ phrase: "export xlsx", codeDeclares: 1, codeMentions: 2, jira: 0, zephyr: 88 }),
+    scoreKeyword({ phrase: "export", codeDeclares: 198, codeMentions: 400, jira: 181, zephyr: 174 }),
+    scoreKeyword({ phrase: "grid data export", codeDeclares: 0, codeMentions: 0, jira: 0, zephyr: 0 }),
+  ];
+  assert.ok(scored[2].generic && /too generic in code/.test(scored[2].reason));
+  assert.deepEqual(scored[0].sources, ["code", "jira", "zephyr"]);
+  assert.deepEqual(chooseKeywords(scored).map((c) => c.phrase), ["grid export", "export xlsx"]);
+
+  const stories = ["Export job fails for big grids", "Grid export: export job never finishes", "Users list export", "Alarm export columns", "Export admin page"];
+  const bridge = bridgeToCode([{ phrase: "export job", declares: 13 }, { phrase: "export admin", declares: 21 }, { phrase: "export timed", declares: 0 }], stories, (p) => keywordRegex([p]));
+  assert.deepEqual(bridge.map((b) => b.phrase), ["export job"], "one story in passing is not enough");
+
+  assert.deepEqual(locateModule({ frontendFiles: ["admin/import-job/a.ts", "admin/import-job/b.ts", "admin/x/c.ts"], otherFiles: [], slugName: "import-job" }).path, "admin/import-job");
+  const cross = locateModule({ frontendFiles: ["admin/a/x.ts", "dispatch/b/y.ts"], otherFiles: ["be/export/Svc.java", "be/export/Dto.java"], slugName: "grid-data-export" });
+  assert.equal(cross.crossCutting, true);
+  assert.equal(cross.codePaths[0], "be/export");
+
+  const folder = dominantFolder(["Ridango > AVL > Data Export (grid Export)", "Ridango > AVL > Data Export (grid Export)", "Ridango > AVL > GTFS"], "Ridango > AVL");
+  assert.deepEqual([folder.folder, folder.cases, folder.of], ["Data Export (grid Export)", 2, 3]);
 });
