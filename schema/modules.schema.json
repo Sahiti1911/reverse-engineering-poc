@@ -24,6 +24,7 @@
           "includeStories": { "type": "array", "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*-\\d+$" }, "description": "Stories that always belong to the module, even without a keyword hit." },
           "excludeStories": { "type": "array", "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*-\\d+$" }, "description": "Stories never analysed for this module (noise)." },
           "jql": { "type": "string", "description": "Optional full JQL that replaces the keyword search." },
+          "uiRoutes": { "type": "array", "items": { "type": "string" }, "description": "Paths of the module's screens relative to the environment's uiBaseUrl (e.g. \"/admin/import-job\"). Without them the ui-explorer finds the route in the frontend code." },
           "notes": { "type": "string", "description": "Anything the agents should know about this module." }
         }
       }

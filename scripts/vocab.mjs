@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Keyword triangulation (0 tokens): what the user means → the module, its keywords and its Zephyr folder,
 // checked against the code (frontend + backend), the Jira stories and the Zephyr cases.
-//   node scripts/vocab.mjs --words "grid data export"                                    (profile from config/run.json)
+//   node scripts/vocab.mjs --words "grid data export"                                    (profile from config/config.yaml)
 //   node scripts/vocab.mjs --words "grid data export" --rovo runs/avl/rovo/grid-data-export.json
 //   node scripts/vocab.mjs --words "grid data export" --save "grid export"               (write the proposal into modules.json)
 // --rovo: what a Rovo search found ({stories: [{key, summary}], docs: [{title, url}]}); its titles add

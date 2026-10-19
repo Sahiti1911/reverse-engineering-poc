@@ -6,7 +6,7 @@ description: Use when asked to find missing test cases / test coverage gaps for 
 # Coverage gap analysis
 
 ## Which entry point
-- **A module or feature in plain words** ("import job", "conductor", "grid data export"): use the agent chain.
+- **A module or feature in plain words** ("import job", "conductor", "grid data export"): use the agent pipeline.
   `node scripts/agents.mjs --profile avl --module "<words>"`, or the `/coverage <words>` command.
   A feature without a folder of its own works too: the code stage sweeps every code root for the module's
   keywords (preview with `node scripts/code-map.mjs --module "<words>" --keywords "a,b"`, 0 tokens).
@@ -16,10 +16,14 @@ description: Use when asked to find missing test cases / test coverage gaps for 
   `node scripts/run.mjs --profile avl --scope <scope>`.
 - **A project with no profile**: follow `profiles/_template/README.md` first.
 
-## Agent chain
-module-scout → requirements-analyst → code-analyst → coverage-matcher → test-designer → reporter.
-Each agent runs its own stage, may write `review/<key>.json`, and forwards its findings
-(`handoff/NN-<agent>.json`) to the next agent. When the scout stops with `blocked`, show its question and
+## Agent pipeline (config/config.yaml `pipeline`)
+module-scout → [requirements-analyst + code-analyst + ui-explorer + zephyr-explorer, in parallel] →
+context-builder → test-designer → coverage-validator → reporter.
+The orchestrator runs each phase's script stages, then the phase's agents side by side. Each agent may write
+`review/<key>.json` and forwards its findings (`handoff/NN-<agent>.json`) to the later phases. The explorers'
+reviews all merge in the context stage. Remove an agent from `pipeline` to switch that part off; the UI
+explorer needs `environments.<env>.uiBaseUrl` and, for `storage-state` login, `npm run ui-login` once. A failed
+optional explorer (code, UI, Zephyr) is reported and the run goes on. When the scout stops with `blocked`, show its question and
 the candidate modules, then re-run with the exact module the user picks. To resume, use `--from <agent>`.
 To save tokens, use `--skip <agent>`.
 
@@ -35,7 +39,7 @@ Give the workbook path. Report tokens only, never money.
 ## Reading the workbook
 - `6_Gaps` is the review list.
 - `Unverified` means a case probably covers the scenario, but with Low confidence.
-- `Code-only` and `needs PO confirmation` scenarios describe current behaviour; confirm the behaviour is
+- `Code-only`, `UI only` and `needs PO confirmation` scenarios describe current behaviour; confirm the behaviour is
   intended before approving.
 - `decidedBy: agent:<name>` and `Agent review` columns show what the agents changed and why.
 

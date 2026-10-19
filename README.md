@@ -12,41 +12,82 @@ It works for any Jira + Zephyr Scale + git project: a project is one `profiles/<
 
 ```sh
 npm install
-node scripts/agents.mjs                            # module + profile: config/run.json defaultModule / defaultProfile
+node scripts/agents.mjs                            # module, profile, environment: config/config.yaml
 node scripts/agents.mjs --module "conductor"       # override the configured module for one run
+npm run ui-login                                   # once per environment, before the UI explorer can log in
 ```
 
 In a Claude Code session, `/coverage import job` does the same thing.
 
-Six agents run in sequence. Each has one job, and each receives the findings of the agents before it.
+### The pipeline is configured in `config/config.yaml`
 
-| # | Agent | Job | What it forwards |
+```yaml
+environment: test                       # --env overrides
+environments:
+  test:
+    uiBaseUrl: https://…                # what the UI explorer opens
+    login: { method: storage-state, storageState: cache/avl/ui/test.storage.json }
+    allowWrites: false                  # full UI mode is refused unless true
+scope:
+  statusCategories: [Done]              # only Done stories ([] = all; issues:K1,K2 and includeStories always count)
+  baseline: none                        # last-run = only stories updated since the previous run of this scope
+pipeline:                               # phases in order; agents of one phase run in parallel
+  - { phase: scope,    agents: [module-scout] }
+  - { phase: explore,  agents: [requirements-analyst, code-analyst, ui-explorer, zephyr-explorer] }
+  - { phase: context,  agents: [context-builder] }
+  - { phase: design,   agents: [test-designer] }
+  - { phase: validate, agents: [coverage-validator] }
+  - { phase: report,   agents: [reporter] }
+agents:
+  ui-explorer: { mode: read-only, maxPages: 8 }   # observe | read-only | full
+  coverage-validator: { maxRounds: 1 }            # redesign rounds with the test-designer
+```
+
+Remove an agent to switch that part off: without `ui-explorer` nothing opens a browser, without `code-analyst`
+the code is not read. `module-scout`, `requirements-analyst` and `context-builder` are required. The same file holds
+the stage tuning that used to be in `config/run.json` (models, batches, limits, token budget).
+
+### The nine agents
+
+| Phase | Agent | Job | Writes |
 |---|---|---|---|
-| 1 | `module-scout` | Plain words → code module, keywords, story set. Drops unrelated stories (e.g. "Conductor" the customer vs the Conductor page). Stops and asks when the name is ambiguous. | module, keywords, kept/dropped stories, linked tests |
-| 2 | `requirements-analyst` | Checks what *should* be tested: fixes triage, adds missed AC scenarios, drops duplicates, flags vague AC | scenario counts, weak AC, what to check in code |
-| 3 | `code-analyst` | Judges code-derived edge cases: keep / drop / needs PO confirmation, **suspected bugs** | kept scenarios, suspected bugs |
-| 4 | `coverage-matcher` | Verifies doubtful Covered/Partial/Missing verdicts by reading the Zephyr steps (read-only) | gaps, overrides, cases to extend or link |
-| 5 | `test-designer` | Brings the drafts in line with the conventions: folder, priority, create vs extend, suggested decision | ready vs needs-review drafts |
-| 6 | `reporter` | Executive summary at the top of `summary.md` | — |
+| scope | `module-scout` | Plain words → code module, keywords, story set (Done only when configured). Stops and asks when the name is ambiguous. | `scout.json` |
+| explore | `requirements-analyst` | What *should* be tested: fixes triage, adds missed AC scenarios, flags vague AC | `requirements.json` |
+| explore | `code-analyst` | Code-derived edge cases: keep / drop / needs PO confirmation, **suspected bugs** | `code.json` |
+| explore | `ui-explorer` | Opens the module's screens with Playwright MCP: what a tester sees, whether expected scenarios show up | `ui.json` |
+| explore | `zephyr-explorer` | The right existing cases to compare with: finds never-linked cases, removes other features' cases | `zephyr.json` |
+| context | `context-builder` | Joins the four, verifies doubtful Covered / Partial / Missing verdicts by reading Zephyr steps | `context.json` |
+| design | `test-designer` | Drafts for Partial / Missing items only, following the conventions | `drafts.json` |
+| validate | `coverage-validator` | No draft duplicates an existing case, no gap left without a usable draft; sends drafts back | `validation.json` |
+| report | `reporter` | Executive summary at the top of `summary.md` | — |
 
-Agents never write to Zephyr or Jira. Each runs headless (`claude -p --agent <name>`) with an exact tool
-allowlist: its own stage command, the `inspect.mjs` viewer, its own review file, and read-only Zephyr tools.
-Agent definitions are in [.claude/agents/](.claude/agents/).
+The orchestrator first runs each phase's script stages (0 agent tokens), then starts the phase's agents. Agents
+never write to Zephyr or Jira. Each runs headless (`claude -p --agent <name>`) with an exact tool allowlist: its own
+review file, the `inspect.mjs` viewer, read-only Zephyr tools where it needs them, and for the UI explorer only the
+Playwright tools of its mode. A failing optional explorer (code, UI, Zephyr) is reported and the run goes on
+(`agents.continueWhenExplorerFails`). Agent definitions are in [.claude/agents/](.claude/agents/).
+
+**UI safety.** The browser can only reach the environment's origin (`--allowed-origins`), runs in an in-memory
+profile, and in `read-only` mode an init script blocks every POST/PUT/PATCH/DELETE the page sends (fetch, XHR,
+form posts, beacons); `allowedWriteUrls` lets through searches sent as POST. `observe` mode has no click or type
+tools at all. `full` is refused unless the environment sets `allowWrites: true`. The saved login lives in
+`cache/<profile>/ui/` (git-ignored) and agents may not read it.
 
 The output lands in `runs/<profile>/<date>_agents-<module>/`:
 - `summary.md`, also copied to `runs/<profile>/latest-summary.md`
-- the workbook
+- the workbook and `coverage.json` (the same results as JSON)
 - `handoff/NN-<agent>.json`: what each agent found and forwarded
-- `review/<agent>.json`: the changes each agent made, merged by the next stage and labelled
-  `agent:<name>` in the workbook
+- `review/<agent>.json`: the changes each agent made, merged by a later stage and labelled `agent:<name>`
+- `ui/`: screenshots and the read-only init script; `mcp.json`: the MCP servers of this run
 
 | Option | Effect |
 |---|---|
+| `--env <name>` | Environment the UI explorer opens (default `environment` in config.yaml) |
 | `--keywords "a,b"` | Suggest related words to the scout |
 | `--extra-stories <file|K1,K2>` | Candidate stories found elsewhere (Rovo), JSON `[{key, summary, query}]`. Fetched only if they are stories of the project, marked `rovo`, confirmed or dropped by the scout |
 | `--limit n` | First n stories (trial) |
-| `--from <agent>` | Resume the latest run of this module from that agent (earlier handoffs are reused) |
-| `--until <agent>` | Stop after that agent |
+| `--from <agent>` | Resume the latest run of this module from that agent's phase (earlier handoffs are reused) |
+| `--until <agent>` | Stop after that agent's phase |
 | `--skip <agent,…>` | Run that stage without its agent review, which saves the agent's tokens (not `module-scout`) |
 | `--run-dir <dir>` | Use a specific run folder |
 
@@ -122,7 +163,7 @@ The `//` comments above are only explanation: the real file is plain JSON (see [
 Only `path` is required, and the file is checked against `schema/modules.schema.json`. When you pass extra
 `--keywords`, they are added to the configured ones. `--remember` on a module run saves the keywords it used
 into this file. Modules that are not listed still work: the scout works them out.
-`config/run.json` → `defaultProfile` makes `--profile` optional everywhere; `defaultModule` (a name or alias
+`config/config.yaml` → `defaultProfile` makes `--profile` optional everywhere; `defaultModule` (a name or alias
 from `modules.json`) makes `--module` optional for `agents.mjs`, `code-map.mjs` and `/coverage`.
 
 ## Plain pipeline (no agents)
@@ -139,7 +180,7 @@ The scopes are `project`, `epic:KEY`, `sprint:active`, `sprint:<name>`, `module:
 `--concurrency`, `--force`, `--refresh-zephyr` and `--out`. `--remember` saves module keywords into the
 profile.
 
-The stages are `scope → requirements → code → match → draft → report`. Each one can also run on its own:
+The stages are `scope → requirements → code → zephyr → context → draft → validate → report`. Each one can also run on its own:
 `node scripts/run.mjs --stage <stage> --run-dir <dir>`. That is how the agents drive the pipeline, and it lets
 you re-run a single step.
 
@@ -149,7 +190,7 @@ the module uses, the classes named after the module that use those types, subcla
 extension points (for example one export handler per grid) and the screens that call the module. Widely
 used helpers are skipped. Everything is packed into `limits.codeBytesPerModule`: the engine as full source,
 variants and helpers as digests, callers as usage lines, with an implementation map listing every file and
-why it was included. Tuning lives in `code.discovery` in `config/run.json` (`keywordSweep` for the sweep above); `searchRoots` in the profile
+why it was included. Tuning lives in `code.discovery` in `config/config.yaml` (`keywordSweep` for the sweep above); `searchRoots` in the profile
 adds code the discovery may follow into (shared services, other backend modules). Preview what would be
 sent, at 0 tokens:
 
@@ -181,7 +222,7 @@ unchanged work uses 0 tokens. Review decisions already in the workbook are kept.
 | 3_Expected_Scenarios | What should be tested (story / code), evidence, agent review (kept / dropped / needs confirmation / suspected bug) |
 | 4_Zephyr_Cases | Existing cases compared, and why |
 | 5_Matching | Covered / Partial / Missing with confidence; `decidedBy` shows agent overrides |
-| 6_Gaps | Drafts, suggested and review decision — **where you review** |
+| 6_Gaps | Drafts, validation result, suggested and review decision — **where you review** |
 | 7_Orphan_Zephyr | Linked cases that match no requirement |
 | 8_Run_Log | Every step, review merge, skip and error |
 | 9_Token_Usage | One row per Claude call and agent session: input, output, cache-read, cache-write and total tokens |
@@ -196,7 +237,7 @@ Only token counts are reported, never money. Measured on AVL (2026-10-17):
 | 12 mixed stories, plain pipeline | ~290k (~36k per testable story) | — |
 | Module `admin/conductor` (15 stories found, 2 relevant) | ~76k | ~483k (scout 81k, requirements 90k, code 119k, matcher 59k, designer 99k, reporter 35k) |
 
-Most agent tokens are cache reads of the agent's own context. The levers are all in `config/run.json`:
+Most agent tokens are cache reads of the agent's own context. The levers are all in `config/config.yaml`:
 the model per stage, the model per agent (`agents.model`), batch sizes, byte caps, and the run budget
 `claude.maxTokensPerRun`. When the budget is reached, Claude calls stop and the workbook is still written.
 Use `--skip <agent>` to trade agent review for tokens.
@@ -217,9 +258,11 @@ Zephyr details plus `conventions.md`, and validate with `--dry-run`. No code cha
 
 | Path | What |
 |---|---|
-| [scripts/agents.mjs](scripts/agents.mjs) | Agent chain orchestrator |
+| [config/config.yaml](config/config.yaml) | Pipeline, environments, scope filters, agent options, stage tuning |
+| [scripts/agents.mjs](scripts/agents.mjs), [scripts/lib/pipeline.mjs](scripts/lib/pipeline.mjs) | Agent pipeline orchestrator; agent registry, pipeline validation, UI safety |
+| [scripts/ui-login.mjs](scripts/ui-login.mjs) | Saves a logged-in browser session for the UI explorer |
 | [scripts/run.mjs](scripts/run.mjs) | Pipeline (all stages or one) and `--create-approved` |
-| [scripts/lib/stages.mjs](scripts/lib/stages.mjs) | The six stages |
+| [scripts/lib/stages.mjs](scripts/lib/stages.mjs) | The eight stages |
 | [scripts/lib/reviews.mjs](scripts/lib/reviews.mjs) | Merging agent review files |
 | [scripts/inspect.mjs](scripts/inspect.mjs), [scripts/modules.mjs](scripts/modules.mjs) | Compact state viewer, module finder |
 | [prompts/](prompts/), [schema/](schema/) | Stage prompts, output / review / handoff schemas (`node scripts/gen-llm-schemas.mjs`) |

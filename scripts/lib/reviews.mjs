@@ -1,5 +1,5 @@
 // Agent review files → state. Each agent writes runs/<run>/review/<key>.json (schema/review/<key>.schema.json);
-// the next stage merges it here. Every change records which agent made it and why, and re-applying the same
+// a later stage merges it here (the explorers' reviews all merge in the context stage). Every change records which agent made it and why, and re-applying the same
 // review is harmless (stages can be re-run).
 import fs from "node:fs";
 import path from "node:path";
@@ -11,8 +11,11 @@ export const REVIEW_AGENTS = {
   scout: "module-scout",
   requirements: "requirements-analyst",
   code: "code-analyst",
-  match: "coverage-matcher",
+  ui: "ui-explorer",
+  zephyr: "zephyr-explorer",
+  context: "context-builder",
   drafts: "test-designer",
+  validation: "coverage-validator",
 };
 
 const ajv = new Ajv({ allErrors: true, strict: false });
@@ -136,9 +139,9 @@ export function applyCodeReview(ctx) {
   return applied;
 }
 
-/** coverage-matcher: verdict overrides after spot-checking existing cases. */
-export function applyMatchReview(ctx) {
-  const review = loadReview(ctx, "match");
+/** context-builder: verdict overrides after spot-checking existing cases. */
+export function applyContextReview(ctx) {
+  const review = loadReview(ctx, "context");
   if (!review) return 0;
   let applied = 0;
   const missing = [];
@@ -147,17 +150,17 @@ export function applyMatchReview(ctx) {
     const r = ctx.stories.find((x) => x.matches?.some((m) => m.expectedId === o.expectedId));
     if (!r) { missing.push(o.expectedId); continue; }
     const m = r.matches.find((x) => x.expectedId === o.expectedId);
-    if (m.decidedBy === by("match") && m.verdict === o.verdict) continue;
+    if (m.decidedBy === by("context") && m.verdict === o.verdict) continue;
     const before = `pipeline said ${m.verdict}/${m.confidence}`;
     m.verdict = o.verdict;
     if (o.matchedKeys) m.matchedKeys = o.matchedKeys;
     m.confidence = o.confidence ?? "High";
     m.autoAccepted = m.verdict === "Covered" && autoAccept.includes(m.confidence);
-    m.decidedBy = by("match");
-    m.reasoning = appendReason(m.reasoning, "match", `${o.reasoning} (${before})`);
+    m.decidedBy = by("context");
+    m.reasoning = appendReason(m.reasoning, "context", `${o.reasoning} (${before})`);
     applied++;
   }
-  finish(ctx, "match", applied, missing);
+  finish(ctx, "context", applied, missing);
   return applied;
 }
 
@@ -182,5 +185,93 @@ export function applyDraftsReview(ctx, folderPathById = new Map()) {
     applied++;
   }
   finish(ctx, "drafts", applied, missing);
+  return applied;
+}
+
+/** The story a module-level scenario (code or UI) is attached to: the one owning the module's QA doc, else the newest. */
+export function primaryStory(rows) {
+  return [...rows].sort((a, b) => (b.triage.acSource === "uc-doc") - (a.triage.acSource === "uc-doc") || String(b.story.updated).localeCompare(String(a.story.updated)))[0] ?? null;
+}
+
+/** ui-explorer: scenarios seen in the running app, and whether existing scenarios show up there. */
+export function applyUiReview(ctx) {
+  const review = loadReview(ctx, "ui");
+  if (!review) return 0;
+  let applied = 0;
+  const missing = [];
+  const primary = primaryStory(ctx.testable());
+  for (const a of review.scenarios ?? []) {
+    const r = a.storyKey ? ctx.R(a.storyKey) : primary;
+    if (!r) { missing.push(a.storyKey ?? "(no testable story)"); continue; }
+    if (r.expected.some((e) => e.title.toLowerCase() === a.title.toLowerCase())) continue;
+    const key = r.story.key;
+    const n = r.expected.filter((e) => e.id.startsWith(`${key}:UI-`)).length + 1;
+    const ev = a.evidence;
+    r.expected.push({
+      id: `${key}:UI-${String(n).padStart(2, "0")}`, storyKey: key, source: "ui", uc: "", flow: a.flow, title: a.title, type: a.type,
+      steps: a.steps, expected: a.expected, evidence: `UI ${ev.url}${ev.element ? ` — ${ev.element}` : ""}${ev.screenshot ? ` (screenshot ${ev.screenshot})` : ""}`,
+      priorityHint: "Medium", codeOnly: false, uiOnly: true, addedBy: by("ui"),
+      reasoning: `Seen in the running app by agent ${REVIEW_AGENTS.ui}: ${a.reasoning} (UI shows what the system does; confirm it is intended.)`,
+    });
+    applied++;
+  }
+  for (const o of review.observations ?? []) {
+    const r = ctx.stories.find((x) => x.expected.some((e) => e.id === o.id));
+    if (!r) { missing.push(o.id); continue; }
+    const e = r.expected.find((x) => x.id === o.id);
+    e.uiCheck = `${o.status}: ${o.reasoning}`;
+    e.reasoning = appendReason(e.reasoning, "ui", `${o.status} in the UI — ${o.reasoning}`);
+    applied++;
+  }
+  finish(ctx, "ui", applied, missing);
+  return applied;
+}
+
+/** zephyr-explorer: candidate cases to add (found by search, never linked) or remove (clearly another feature). */
+export function applyZephyrReview(ctx, zephyr) {
+  const review = loadReview(ctx, "zephyr");
+  if (!review) return 0;
+  let applied = 0;
+  const missing = [];
+  for (const c of review.candidates ?? []) {
+    const r = ctx.R(c.storyKey);
+    if (!r) { missing.push(c.storyKey); continue; }
+    r.candidates ??= [];
+    for (const key of c.add ?? []) {
+      if (!zephyr.byKey.has(key)) { missing.push(key); continue; }
+      if (r.candidates.some((x) => x.key === key)) continue;
+      r.candidates.push({ key, why: `added by agent ${REVIEW_AGENTS.zephyr}: ${c.reasoning}`, linked: false });
+      applied++;
+    }
+    for (const key of c.remove ?? []) {
+      const x = r.candidates.find((y) => y.key === key);
+      // Linked cases stay: removing them would hide orphans and real coverage.
+      if (!x || x.linked) { missing.push(key); continue; }
+      r.candidates = r.candidates.filter((y) => y.key !== key);
+      applied++;
+    }
+  }
+  finish(ctx, "zephyr", applied, missing);
+  return applied;
+}
+
+/** coverage-validator: confirmed duplicates are suggested for rejection, drafts needing work for review. */
+export function applyValidationReview(ctx) {
+  const review = loadReview(ctx, "validation");
+  if (!review) return 0;
+  let applied = 0;
+  const missing = [];
+  for (const v of review.results ?? []) {
+    const r = ctx.stories.find((x) => x.gaps?.some((g) => g.gapId === v.gapId));
+    if (!r) { missing.push(v.gapId); continue; }
+    const g = r.gaps.find((x) => x.gapId === v.gapId);
+    g.validation = { verdict: v.verdict, duplicateOf: v.duplicateOf ?? [], by: by("validation"), reasoning: v.reasoning };
+    if (g.draft && v.verdict !== "ok") {
+      g.draft.suggestedDecision = v.verdict === "duplicate" ? "Reject" : "Review";
+      g.draft.decisionReasoning = appendReason(g.draft.decisionReasoning, "validation", `${v.verdict}${v.duplicateOf?.length ? ` of ${v.duplicateOf.join(", ")}` : ""} — ${v.reasoning}`);
+    }
+    applied++;
+  }
+  finish(ctx, "validation", applied, missing);
   return applied;
 }

@@ -18,7 +18,7 @@ import { readJson, writeJson } from "./lib/util.mjs";
 
 const USAGE = `Usage:
   node scripts/run.mjs --module "<name>" [options]                         all stages for a module (name/alias from modules.json, or a code path)
-  node scripts/run.mjs [--profile <name>] --scope <scope> [options]        all stages (profile defaults to config/run.json defaultProfile)
+  node scripts/run.mjs [--profile <name>] --scope <scope> [options]        all stages (profile defaults to config/config.yaml defaultProfile)
   node scripts/run.mjs --stage <stage> --run-dir <dir> [options]           one stage (${STAGES.join(" → ")})
   node scripts/run.mjs --create-approved <workbook.xlsx> [--yes]
 
@@ -30,7 +30,7 @@ Options:
                                  [{key, summary, query}]); added for the scout to confirm, not keyword-matched
   --since <YYYY-MM-DD|last-run>  only stories updated since then
   --limit <n>                    first n stories of the scope (trial runs)
-  --concurrency <n>              parallel Claude calls (default config/run.json)
+  --concurrency <n>              parallel Claude calls (default config/config.yaml)
   --no-code                      skip code-derived scenarios
   --refresh-zephyr               ignore the cached Zephyr export
   --force                        ignore cached Claude results (uses tokens again)
@@ -59,7 +59,7 @@ if (args["create-approved"]) {
   process.exit(0);
 }
 
-// --profile defaults to config/run.json defaultProfile; --module "<name>" is short for --scope module:<name>.
+// --profile defaults to config/config.yaml defaultProfile; --module "<name>" is short for --scope module:<name>.
 if (!args.stage || args.stage === "scope") args.profile = profileName(args.profile);
 if (args.module && !args.scope) args.scope = `module:${args.module}`;
 
@@ -137,7 +137,7 @@ try {
       console.log("No stories in scope — nothing to analyse.");
       process.exit(0);
     }
-    for (const stage of ["requirements", "code", "match", "draft"]) {
+    for (const stage of ["requirements", "code", "zephyr", "context", "draft", "validate"]) {
       await STAGE_FUNCS[stage](ctx);
       ctx.save();
     }

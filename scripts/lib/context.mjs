@@ -9,7 +9,7 @@ import { readJson, writeJson, nowIso } from "./util.mjs";
 import { exportZephyr } from "./zephyr.mjs";
 import { createJiraClient } from "./jira.mjs";
 
-export const STAGES = ["scope", "requirements", "code", "match", "draft", "report"];
+export const STAGES = ["scope", "requirements", "code", "zephyr", "context", "draft", "validate", "report"];
 
 export class RunContext {
   constructor({ runDir, state, profile, cfg, opts = {}, freshTokens = false }) {

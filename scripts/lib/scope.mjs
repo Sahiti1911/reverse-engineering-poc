@@ -32,7 +32,7 @@ export function normalizeExtraStories(extra, projectKey) {
     .map((x) => ({ key: x.key, summary: x.summary ?? "", query: x.query ?? "", source: x.source ?? "rovo" }));
 }
 
-export function resolveScope(scopeArg, profile, { since, keywords, extraStories } = {}) {
+export function resolveScope(scopeArg, profile, { since, keywords, extraStories, statusCategories = [] } = {}) {
   if (!scopeArg) throw new Error(`--scope is required (${KINDS.join(" | ")})`);
   const idx = scopeArg.indexOf(":");
   const kind = idx === -1 ? scopeArg : scopeArg.slice(0, idx);
@@ -46,6 +46,7 @@ export function resolveScope(scopeArg, profile, { since, keywords, extraStories 
   let moduleFilter = null;
   let moduleConf = null;
   let extra = [];
+  let include = [];
   switch (kind) {
     case "project": jql = base; break;
     case "epic": jql = `${base} AND parent = ${value}`; break;
@@ -59,7 +60,7 @@ export function resolveScope(scopeArg, profile, { since, keywords, extraStories 
       const kws = normalizeKeywords([...(conf.keywords ?? []), ...given], value);
       // Text search narrows the fetch to stories that mention the module (incl. UC docs naming its path).
       jql = conf.jql ?? `${base} AND (${kws.map((k) => `text ~ "\\"${k}\\""`).join(" OR ")})`;
-      if (conf.includeStories?.length) jql = `(${jql}) OR key in (${conf.includeStories.join(", ")})`;
+      include = conf.includeStories ?? [];
       // Extra candidates (Rovo) are fetched too, but only when they are stories of this project.
       extra = normalizeExtraStories(extraStories, projectKey);
       if (extra.length) jql = `(${jql}) OR (key in (${extra.map((x) => x.key).join(", ")}) AND ${base})`;
@@ -75,6 +76,12 @@ export function resolveScope(scopeArg, profile, { since, keywords, extraStories 
     }
     case "jql": jql = value; break;
   }
+  // Stories named explicitly (issues:K1,K2) are analysed whatever their status.
+  const statuses = kind === "issues" ? [] : statusCategories ?? [];
+  if (statuses.length) jql = `(${jql}) AND statusCategory in (${statuses.map((c) => `"${String(c).replace(/"/g, "")}"`).join(", ")})`;
   if (since) jql = `(${jql}) AND updated >= "${since}"`;
-  return { kind, value, jql: `${jql} ORDER BY key ASC`, moduleFilter, moduleConf, extraStories: extra, keywords: kind === "module" ? keywords : [], since: since ?? null, slug: slug(kind === "project" ? "project" : `${kind}-${value}`) + (since ? `-since-${slug(since)}` : "") };
+  // includeStories are always analysed, whatever their status or update date.
+  if (include.length) jql = `(${jql}) OR key in (${include.join(", ")})`;
+  const baseSlug = slug(kind === "project" ? "project" : `${kind}-${value}`);
+  return { kind, value, jql: `${jql} ORDER BY key ASC`, moduleFilter, moduleConf, extraStories: extra, keywords: kind === "module" ? keywords : [], since: since ?? null, statusCategories: statuses, baselineKey: baseSlug, slug: baseSlug + (since ? `-since-${slug(since)}` : "") };
 }

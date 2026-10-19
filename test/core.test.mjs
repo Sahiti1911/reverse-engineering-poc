@@ -8,14 +8,17 @@ import { triageByRules, deriveModule, detectAcSource, keywordRegex } from "../sc
 import { resolveScope, normalizeExtraStories } from "../scripts/lib/scope.mjs";
 import { summarizeTokens, TokenLog } from "../scripts/lib/tokens.mjs";
 import { findModules } from "../scripts/modules.mjs";
-import { CHAIN, allowedTools, buildPrompt } from "../scripts/agents.mjs";
+import { allowedTools, buildPrompt } from "../scripts/agents.mjs";
+import { AGENTS, resolvePipeline, resolveEnvironment, uiTools, checkUiMode, playwrightArgs, blockWritesScript } from "../scripts/lib/pipeline.mjs";
+import { validateGap } from "../scripts/lib/validate.mjs";
+import vm from "node:vm";
 import { RunContext } from "../scripts/lib/context.mjs";
-import { applyRequirementsReview, applyCodeReview, applyMatchReview, applyScoutReview } from "../scripts/lib/reviews.mjs";
+import { applyRequirementsReview, applyCodeReview, applyContextReview, applyScoutReview, applyUiReview, applyZephyrReview, applyValidationReview, primaryStory } from "../scripts/lib/reviews.mjs";
 import { renderSummary } from "../scripts/lib/report.mjs";
 import { formatSteps, parseSteps, buildWorkbook, readGapSheet } from "../scripts/lib/workbook.mjs";
 import { selectCandidates } from "../scripts/lib/candidates.mjs";
 import { segments, candidatePhrases, scoreKeyword, chooseKeywords, bridgeToCode, locateModule, dominantFolder } from "../scripts/lib/vocab.mjs";
-import { loadProfile, resolveModule, loadModulesCatalog } from "../scripts/lib/config.mjs";
+import { loadProfile, resolveModule, loadModulesCatalog, loadRunConfig } from "../scripts/lib/config.mjs";
 import { htmlToText, hash } from "../scripts/lib/util.mjs";
 import { compactSource } from "../scripts/lib/code.mjs";
 import { parseSource, buildIndex, moduleTokens, nameMatches, discoverImplementation, digestSource, usageSnippet, packWithinBudget, phraseWords, wordsMatch, keywordHits, sweepKeywords, mentionSnippet } from "../scripts/lib/discover.mjs";
@@ -147,9 +150,9 @@ test("agent reviews merge into state, record the agent and are safe to re-apply"
   write("scout", { dropStories: [{ key: "AVLN-2", reasoning: "customer project" }] });
   write("requirements", { dropScenarios: [{ id: "AVLN-1:S02", reasoning: "duplicate of S01" }], addScenarios: [{ storyKey: "AVLN-1", title: "New one", flow: "exception", type: "validation", steps: ["x"], expected: "y", evidence: "AC: y", reasoning: "AC 3 untested" }], flags: [{ key: "AVLN-1", issue: "AC 2 is vague" }] });
   write("code", { decisions: [{ id: "AVLN-1:CODE-01", decision: "needs-confirmation", suspectedBug: true, reasoning: "no permission check" }] });
-  write("match", { overrides: [{ expectedId: "AVLN-1:S01", verdict: "Covered", matchedKeys: ["QA-T1"], confidence: "High", reasoning: "QA-T1 step 4" }] });
+  write("context", { overrides: [{ expectedId: "AVLN-1:S01", verdict: "Covered", matchedKeys: ["QA-T1"], confidence: "High", reasoning: "QA-T1 step 4" }] });
   const ctx = load();
-  for (let i = 0; i < 2; i++) { applyScoutReview(ctx); applyRequirementsReview(ctx); applyCodeReview(ctx); applyMatchReview(ctx); }
+  for (let i = 0; i < 2; i++) { applyScoutReview(ctx); applyRequirementsReview(ctx); applyCodeReview(ctx); applyContextReview(ctx); }
   assert.equal(ctx.R("AVLN-2").dropped.by, "agent:module-scout");
   assert.deepEqual(ctx.testable().map((r) => r.story.key), ["AVLN-1"]);
   const r = ctx.R("AVLN-1");
@@ -159,9 +162,9 @@ test("agent reviews merge into state, record the agent and are safe to re-apply"
   assert.equal(r.expected[1].codeReview, "needs PO confirmation");
   assert.equal(r.expected[1].suspectedBug, true);
   assert.equal(r.matches[0].verdict, "Covered");
-  assert.equal(r.matches[0].decidedBy, "agent:coverage-matcher");
+  assert.equal(r.matches[0].decidedBy, "agent:context-builder");
   assert.equal(r.matches[0].autoAccepted, true);
-  assert.equal(r.matches[0].reasoning.match(/Agent coverage-matcher/g).length, 1);
+  assert.equal(r.matches[0].reasoning.match(/Agent context-builder/g).length, 1);
   write("code", { decisions: [{ id: "AVLN-1:CODE-01", decision: "maybe", reasoning: "x" }] });
   assert.throws(() => applyCodeReview(ctx), /does not match schema/);
 });
@@ -217,18 +220,130 @@ test("module ranking: plain words, plurals and compact names", () => {
   assert.deepEqual(findModules("zzz", mods), []);
 });
 
-test("agent allowlists: own stage only, review file only, Zephyr read-only", () => {
-  const byName = Object.fromEntries(CHAIN.map((c) => [c.name, allowedTools(c, "runs/avl/x")]));
+test("agent allowlists: own stage only, review file only, Zephyr read-only, UI by mode", () => {
+  const byName = Object.fromEntries(Object.entries(AGENTS).map(([name, def]) => [name, allowedTools({ name, ...def }, "runs/avl/x")]));
   assert.ok(byName["module-scout"].includes("Bash(node scripts/run.mjs --stage scope *)"));
-  assert.ok(!byName["module-scout"].some((t) => t.includes("--stage match")));
-  assert.ok(byName["coverage-matcher"].includes("Edit(./runs/avl/x/review/*.json)"));
+  assert.ok(!byName["module-scout"].some((t) => t.includes("--stage context")));
+  assert.ok(byName["context-builder"].includes("Edit(./runs/avl/x/review/*.json)"));
   assert.ok(!Object.values(byName).flat().some((t) => /create_test_case|update_test|link_test_case/.test(t)));
   assert.ok(!byName.reporter.some((t) => t.startsWith("Edit")));
-  const prompt = buildPrompt({ agent: CHAIN[3], rel: "runs/avl/x", profile, moduleWords: "import job", previous: [{ agent: "code-analyst", status: "ok", findings: ["CODE-14 suspected bug"], forwardNotes: "check T10870" }] });
+  for (const n of ["requirements-analyst", "code-analyst", "ui-explorer", "zephyr-explorer", "context-builder", "test-designer", "coverage-validator"]) {
+    assert.ok(!byName[n].some((t) => t.includes("--stage")), n);
+  }
+  assert.ok(byName["ui-explorer"].includes("mcp__playwright__browser_click"));
+  assert.ok(!Object.entries(byName).some(([n, tools]) => n !== "ui-explorer" && tools.some((t) => t.startsWith("mcp__playwright"))));
+  const observe = allowedTools({ name: "ui-explorer", ...AGENTS["ui-explorer"] }, "runs/avl/x", { uiMode: "observe" });
+  assert.ok(observe.includes("mcp__playwright__browser_snapshot") && !observe.includes("mcp__playwright__browser_click"));
+  const prompt = buildPrompt({ agent: { name: "context-builder", ...AGENTS["context-builder"] }, rel: "runs/avl/x", profile, moduleWords: "import job", previous: [{ agent: "code-analyst", status: "ok", findings: ["CODE-14 suspected bug"], forwardNotes: "check T10870" }] });
   assert.match(prompt, /CODE-14 suspected bug/);
   assert.match(prompt, /Forwarded to you: check T10870/);
-  assert.match(prompt, /match stage has ALREADY been run/);
-  assert.ok(!byName["coverage-matcher"].some((t) => t.includes("--stage")));
+  assert.match(prompt, /context stage has ALREADY been run/);
+  const uiPrompt = buildPrompt({ agent: { name: "ui-explorer", ...AGENTS["ui-explorer"] }, rel: "runs/avl/x", profile, moduleWords: "import job", previous: [], ui: { envName: "test", baseUrl: "https://t.example", mode: "read-only", maxPages: 5, outputDir: "runs/avl/x/ui" } });
+  assert.match(uiPrompt, /no script stage/);
+  assert.match(uiPrompt, /blocks every POST/);
+  assert.match(uiPrompt, /at most 5 distinct pages/);
+});
+
+test("config.yaml: the shipped pipeline is valid; bad pipelines are refused", () => {
+  const cfg = loadRunConfig();
+  const phases = resolvePipeline(cfg);
+  assert.deepEqual(phases.map((p) => p.phase), ["scope", "explore", "context", "design", "validate", "report"]);
+  assert.deepEqual(phases[1].agents.map((x) => x.name), ["requirements-analyst", "code-analyst", "ui-explorer", "zephyr-explorer"]);
+  const base = (pipeline) => ({ pipeline });
+  const ok = [{ phase: "scope", agents: ["module-scout"] }, { phase: "explore", agents: ["requirements-analyst"] }, { phase: "context", agents: ["context-builder"] }];
+  assert.equal(resolvePipeline(base(ok)).length, 3);
+  assert.throws(() => resolvePipeline(base([...ok, { phase: "design", agents: ["nobody"] }])), /unknown agent 'nobody'/);
+  assert.throws(() => resolvePipeline(base([...ok, { phase: "design", agents: ["reporter"] }])), /belongs in phase 'report'/);
+  assert.throws(() => resolvePipeline(base(ok.slice(0, 2))), /required agent\(s\) missing.*context-builder/);
+  assert.throws(() => resolvePipeline(base([...ok, { phase: "context", agents: [] }])), /listed twice/);
+});
+
+test("UI environment and modes: full needs allowWrites; Playwright stays on the environment's origin", () => {
+  const cfg = { environment: "test", environments: { test: { uiBaseUrl: "https://avl-test.example/app/", login: { method: "none" } }, sandbox: { uiBaseUrl: "https://sb.example", allowWrites: true } } };
+  const env = resolveEnvironment(cfg);
+  assert.equal(env.name, "test");
+  assert.throws(() => resolveEnvironment(cfg, "prod"), /environment 'prod' not found/);
+  assert.throws(() => checkUiMode("full", env), /allowWrites/);
+  checkUiMode("full", resolveEnvironment(cfg, "sandbox"));
+  assert.throws(() => uiTools("wild"), /must be one of/);
+  for (const mode of ["observe", "read-only", "full"]) {
+    assert.ok(!uiTools(mode).some((t) => /evaluate|run_code|file_upload|route|cookie|storage|localstorage/.test(t)), mode);
+  }
+  const args = playwrightArgs({ pkg: "@playwright/mcp@0.0.83", env, outputDir: "out", storageStatePath: "s.json", initScriptPath: "b.js" });
+  assert.deepEqual(args.slice(args.indexOf("--allowed-origins"), args.indexOf("--allowed-origins") + 2), ["--allowed-origins", "https://avl-test.example"]);
+  assert.ok(args.includes("--isolated") && args.includes("--headless"));
+  assert.equal(args[args.indexOf("--storage-state") + 1], "s.json");
+  assert.equal(args[args.indexOf("--init-script") + 1], "b.js");
+});
+
+test("read-only init script blocks writes from the page but lets reads and allowed URLs through", async () => {
+  class XHR { open() {} send() { this.sent = true; } abort() { this.aborted = true; } dispatchEvent() {} }
+  const listeners = [];
+  const sandbox = {
+    window: { fetch: async (url) => `ok ${url}` }, XMLHttpRequest: XHR, ProgressEvent: class {}, navigator: { sendBeacon: () => true },
+    document: { addEventListener: (type, fn) => listeners.push(fn) }, console: { warn() {} },
+  };
+  vm.runInNewContext(blockWritesScript(["/api/grid/search$"]), sandbox);
+  const w = sandbox.window;
+  assert.equal(await w.fetch("/api/jobs"), "ok /api/jobs");
+  await assert.rejects(w.fetch("/api/jobs", { method: "POST" }), /read-only/);
+  assert.equal(await w.fetch("/api/grid/search", { method: "post" }), "ok /api/grid/search");
+  const x = new XHR();
+  x.open("DELETE", "/api/jobs/1");
+  x.send();
+  assert.ok(x.aborted && !x.sent);
+  assert.equal(sandbox.navigator.sendBeacon("/api/log"), false);
+  let prevented = false;
+  listeners[0]({ target: { method: "post", action: "/save" }, preventDefault: () => (prevented = true), stopImmediatePropagation() {} });
+  assert.ok(prevented);
+  assert.deepEqual([...w.__blockedWrites], ["POST /api/jobs", "DELETE /api/jobs/1", "POST /api/log", "POST /save"]);
+  assert.throws(() => blockWritesScript(["("]), /Invalid regular expression/);
+});
+
+test("scope: status-category filter, except for named stories and includeStories", () => {
+  const done = resolveScope("module:admin/import-job", profile, { statusCategories: ["Done"] });
+  assert.match(done.jql, /statusCategory in \("Done"\)\) OR key in \(AVLN-2398\)/);
+  assert.equal(done.baselineKey, "module-admin-import-job");
+  assert.doesNotMatch(resolveScope("issues:AVLN-1", profile, { statusCategories: ["Done"] }).jql, /statusCategory/);
+  assert.doesNotMatch(resolveScope("project", profile).jql, /statusCategory/);
+});
+
+test("validateGap: undrafted, duplicate by name, extend target ignored", () => {
+  const cases = [{ key: "QA-T1", name: "AVL - Import Job - Upload rejected bundle shows error" }, { key: "QA-T2", name: "Unrelated grid column order" }];
+  assert.equal(validateGap({ gapId: "G1", draftError: "timeout" }, cases).verdict, "undrafted");
+  const dup = validateGap({ gapId: "G2", draft: { name: "Import Job - Upload rejected bundle shows error" } }, cases);
+  assert.equal(dup.verdict, "possible-duplicate");
+  assert.deepEqual(dup.duplicateOf, ["QA-T1"]);
+  assert.equal(validateGap({ gapId: "G3", draft: { name: "Import Job - Upload rejected bundle shows error", action: "extend", extendKey: "QA-T1" } }, cases).verdict, "ok");
+  assert.equal(validateGap({ gapId: "G4", draft: { name: "Export stops grid timetable" } }, cases).verdict, "ok");
+});
+
+test("UI, Zephyr and validation reviews merge into state and are safe to re-apply", () => {
+  const e = (id, extra = {}) => ({ id, storyKey: "AVLN-1", source: "story", flow: "main", title: id, type: "positive", steps: [], expected: "", reasoning: "orig", ...extra });
+  const { runDir, ctx: load } = tempRun([
+    { story: story({ key: "AVLN-1" }), triage: { testable: true, acSource: "uc-doc", decidedBy: "rule", reasoning: "r" }, expected: [e("AVLN-1:S01")], candidates: [{ key: "QA-T1", why: "linked", linked: true }, { key: "QA-T2", why: "kw", linked: false }], matches: [],
+      gaps: [{ gapId: "GAP-1", draft: { name: "Dup", suggestedDecision: "Approve", decisionReasoning: "clear" } }], errors: [] },
+    { story: story({ key: "AVLN-3", id: 3, updated: "2026-09-01" }), triage: { testable: true, acSource: "ac-text", decidedBy: "rule", reasoning: "r" }, expected: [], matches: [], errors: [] },
+  ]);
+  const write = (k, v) => fs.writeFileSync(path.join(runDir, "review", `${k}.json`), JSON.stringify(v));
+  write("ui", {
+    scenarios: [{ title: "Empty grid shows 'No jobs'", flow: "alt", type: "positive", steps: ["Open Import Job with no jobs"], expected: "Message 'No jobs'", evidence: { url: "https://t/import-job", element: "No jobs" }, reasoning: "seen on the empty list" }],
+    observations: [{ id: "AVLN-1:S01", status: "different", reasoning: "button is labelled Upload, not Add" }],
+  });
+  write("zephyr", { candidates: [{ storyKey: "AVLN-1", add: ["QA-T3", "QA-T404"], remove: ["QA-T1", "QA-T2"], reasoning: "found by search" }] });
+  write("validation", { results: [{ gapId: "GAP-1", verdict: "duplicate", duplicateOf: ["QA-T3"], reasoning: "QA-T3 steps 2-4 do the same" }] });
+  const ctx = load();
+  const zephyr = { byKey: new Map(["QA-T1", "QA-T2", "QA-T3"].map((k) => [k, { key: k }])) };
+  for (let i = 0; i < 2; i++) { applyUiReview(ctx); applyZephyrReview(ctx, zephyr); applyValidationReview(ctx); }
+  const r = ctx.R("AVLN-1");
+  assert.equal(primaryStory(ctx.testable()).story.key, "AVLN-1"); // owns the UC doc
+  assert.deepEqual(r.expected.map((x) => [x.id, x.source]), [["AVLN-1:S01", "story"], ["AVLN-1:UI-01", "ui"]]);
+  assert.match(r.expected[0].uiCheck, /^different: button is labelled Upload/);
+  assert.match(r.expected[1].evidence, /^UI https:\/\/t\/import-job — No jobs/);
+  assert.deepEqual(r.candidates.map((c) => c.key), ["QA-T1", "QA-T3"]); // linked QA-T1 stays, unknown QA-T404 ignored
+  assert.equal(r.gaps[0].validation.verdict, "duplicate");
+  assert.equal(r.gaps[0].draft.suggestedDecision, "Reject");
+  assert.equal(r.gaps[0].draft.decisionReasoning.match(/Agent coverage-validator/g).length, 1);
 });
 
 test("steps survive the Excel text round-trip, including edits", () => {

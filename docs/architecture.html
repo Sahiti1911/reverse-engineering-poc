@@ -97,7 +97,7 @@ td li { margin-bottom: 3px; }
 .breaks h3 { font-size: 14.5px; margin: 0 0 6px; }
 .breaks p { font-size: 13.5px; margin: 0 0 6px; color: var(--muted); }
 .breaks p.fix { color: var(--fg); margin: 0; }
-.breaks p.fix::before { content: "Fix: "; font-weight: 600; }
+.breaks p.fix::before { content: "Now: "; font-weight: 600; }
 
 .questions { margin: 0; padding-left: 20px; display: grid; gap: 8px; max-width: 80ch; }
 .questions b { font-weight: 600; }
@@ -127,7 +127,7 @@ summary:focus-visible { outline: 2px solid var(--agent-edge); outline-offset: 3p
   <section>
     <div class="prose">
       <h2>Target flow</h2>
-      <p>Each box shows how much of today's code it can reuse. Each explorer writes its own file, and only the context builder combines them.</p>
+      <p>Every box is an agent. <code>config/config.yaml</code> says which agents run in each phase; the agents of one phase run in parallel. Each explorer writes its own review file, and only the context stage combines them.</p>
     </div>
     <figure>
       <div class="scroll target">
@@ -142,7 +142,10 @@ summary:focus-visible { outline: 2px solid var(--agent-edge); outline-offset: 3p
           <rect class="box-ext" x="380" y="20" width="340" height="84" rx="6"/>
           <text class="t-name" x="550" y="44" text-anchor="middle">Scope agent</text>
           <text class="t-sub" x="550" y="62" text-anchor="middle">env.yaml · Done stories only · baseline</text>
-          <text class="s-ext" x="550" y="88" text-anchor="middle">EXTEND · module-scout + scope stage</text>
+          <text class="s-ext" x="550" y="88" text-anchor="middle">module-scout · statusCategories, baseline</text>
+          <text class="t-lane" x="20" y="40">EVERY BOX IS AN AGENT</text>
+          <text class="t-mono" x="20" y="58">phases + agents: config/config.yaml</text>
+          <text class="t-mono" x="20" y="74">remove an agent = part off</text>
 
           <!-- fan-out -->
           <path class="ar" d="M550,105 V128"/>
@@ -158,25 +161,25 @@ summary:focus-visible { outline: 2px solid var(--agent-edge); outline-offset: 3p
           <text class="t-name" x="155" y="182" text-anchor="middle">Requirements</text>
           <text class="t-sub" x="155" y="200" text-anchor="middle">Jira · Done stories, UC docs, AC</text>
           <text class="t-mono" x="155" y="222" text-anchor="middle">→ requirements.json</text>
-          <text class="s-ext" x="155" y="252" text-anchor="middle">EXTEND · requirements stage</text>
+          <text class="s-ext" x="155" y="252" text-anchor="middle">requirements-analyst</text>
 
           <rect class="box-reuse" x="300" y="158" width="230" height="110" rx="6"/>
           <text class="t-name" x="415" y="182" text-anchor="middle">Code</text>
           <text class="t-sub" x="415" y="200" text-anchor="middle">Bitbucket · frontend + backend</text>
           <text class="t-mono" x="415" y="222" text-anchor="middle">→ code.json</text>
-          <text class="s-reuse" x="415" y="252" text-anchor="middle">REUSE · code stage + analyst</text>
+          <text class="s-reuse" x="415" y="252" text-anchor="middle">code-analyst</text>
 
           <rect class="box-new" x="560" y="158" width="230" height="110" rx="6"/>
           <text class="t-name" x="675" y="182" text-anchor="middle">UI</text>
           <text class="t-sub" x="675" y="200" text-anchor="middle">Test env · Playwright MCP</text>
           <text class="t-mono" x="675" y="222" text-anchor="middle">→ ui.json</text>
-          <text class="s-new" x="675" y="252" text-anchor="middle">NEW · ui-explorer agent</text>
+          <text class="s-new" x="675" y="252" text-anchor="middle">ui-explorer · mode read-only</text>
 
           <rect class="box-new" x="820" y="158" width="230" height="110" rx="6"/>
           <text class="t-name" x="935" y="182" text-anchor="middle">Zephyr + QA</text>
           <text class="t-sub" x="935" y="200" text-anchor="middle">Existing cases, steps, folders</text>
           <text class="t-mono" x="935" y="222" text-anchor="middle">→ zephyr.json</text>
-          <text class="s-new" x="935" y="252" text-anchor="middle">NEW · zephyr.mjs + candidates</text>
+          <text class="s-new" x="935" y="252" text-anchor="middle">zephyr-explorer</text>
 
           <!-- merge -->
           <path class="ar" d="M155,269 V296"/>
@@ -192,7 +195,7 @@ summary:focus-visible { outline: 2px solid var(--agent-edge); outline-offset: 3p
           <text class="t-name" x="550" y="348" text-anchor="middle">Context builder</text>
           <text class="t-sub" x="550" y="366" text-anchor="middle">joins per requirement: code + UI evidence, linked and candidate Zephyr cases</text>
           <text class="t-mono" x="550" y="386" text-anchor="middle">→ context.json · each item Covered / Partial / Uncovered</text>
-          <text class="s-new" x="550" y="408" text-anchor="middle">NEW · replaces match stage, reuses its prompt</text>
+          <text class="s-new" x="550" y="408" text-anchor="middle">context-builder · merges all four reviews</text>
 
           <path class="ar" d="M550,421 V447" marker-end="url(#n)"/>
 
@@ -200,7 +203,7 @@ summary:focus-visible { outline: 2px solid var(--agent-edge); outline-offset: 3p
           <rect class="box-reuse" x="380" y="450" width="340" height="84" rx="6"/>
           <text class="t-name" x="550" y="474" text-anchor="middle">Test design agent</text>
           <text class="t-sub" x="550" y="492" text-anchor="middle">only Partial / Uncovered items → drafts.json</text>
-          <text class="s-reuse" x="550" y="520" text-anchor="middle">REUSE · draft stage + test-designer</text>
+          <text class="s-reuse" x="550" y="520" text-anchor="middle">test-designer</text>
 
           <path class="ar" d="M550,535 V561" marker-end="url(#n)"/>
 
@@ -208,7 +211,7 @@ summary:focus-visible { outline: 2px solid var(--agent-edge); outline-offset: 3p
           <rect class="box-new" x="380" y="564" width="340" height="84" rx="6"/>
           <text class="t-name" x="550" y="588" text-anchor="middle">Coverage validator</text>
           <text class="t-sub" x="550" y="606" text-anchor="middle">no duplicate of an existing case · no gap left undrafted</text>
-          <text class="s-new" x="550" y="634" text-anchor="middle">NEW · from coverage-matcher's Zephyr tools</text>
+          <text class="s-new" x="550" y="634" text-anchor="middle">coverage-validator · maxRounds 1</text>
           <path class="ar-loop" d="M380,606 H330 V492 H377" marker-end="url(#nl)"/>
           <text class="t-llm" x="322" y="545" text-anchor="end">rejected drafts</text>
           <text class="t-llm" x="322" y="560" text-anchor="end">go back (max 1 round)</text>
@@ -219,7 +222,7 @@ summary:focus-visible { outline: 2px solid var(--agent-edge); outline-offset: 3p
           <rect class="box-ext" x="380" y="678" width="340" height="84" rx="6"/>
           <text class="t-name" x="550" y="702" text-anchor="middle">Gap report + review</text>
           <text class="t-sub" x="550" y="720" text-anchor="middle">Excel + JSON · testers approve in 6_Gaps</text>
-          <text class="s-ext" x="550" y="748" text-anchor="middle">EXTEND · report stage + JSON export</text>
+          <text class="s-ext" x="550" y="748" text-anchor="middle">reporter · Excel + coverage.json</text>
 
           <rect class="box-danger" x="820" y="690" width="230" height="60" rx="6"/>
           <text class="t-name" x="935" y="714" text-anchor="middle">create-approved</text>
@@ -229,13 +232,13 @@ summary:focus-visible { outline: 2px solid var(--agent-edge); outline-offset: 3p
         </svg>
       </div>
       <div class="legend">
-        <span><i class="sw new"></i>New</span>
-        <span><i class="sw ext"></i>Extends existing code</span>
-        <span><i class="sw reuse"></i>Reused as is</span>
+        <span><i class="sw new"></i>New agent</span>
+        <span><i class="sw ext"></i>Existing agent, extended</span>
+        <span><i class="sw reuse"></i>Existing agent, unchanged</span>
         <span><i class="dash new"></i>Validator sends rejected drafts back</span>
         <span><i class="sw danger"></i>The only write to Zephyr</span>
       </div>
-      <figcaption>The main change from today is that the four explorers no longer wait for each other. Today the code stage reads the requirement scenarios, and matching happens after both are done. In the new flow, everything that compares sources happens in the context builder.</figcaption>
+      <figcaption>Before each phase the orchestrator runs that phase's script stages, one after another and at 0 agent tokens. Then the phase's agents start together. Everything that compares sources happens in the context phase.</figcaption>
     </figure>
   </section>
 
@@ -248,21 +251,21 @@ summary:focus-visible { outline: 2px solid var(--agent-edge); outline-offset: 3p
           <tr><td>Scope agent</td><td><code>module-scout</code> + scope stage: JQL, module filter, rule triage, Zephyr export, link check</td>
             <td><ul><li>Reads <code>env.yaml</code> (environment URL, login reference, run settings)</li><li>Adds a Done filter: <code>statusCategory = Done</code> in the JQL</li><li>Baseline: compares with the previous run so only new or changed stories are analysed</li><li>Zephyr export and link check move to the Zephyr explorer</li></ul></td><td><span class="pill ext">extend</span></td></tr>
           <tr><td>Requirements</td><td>requirements stage + <code>requirements-analyst</code>: LLM triage, UC-doc parser, extract-ac</td>
-            <td><ul><li>Writes <code>requirements.json</code> instead of mutating shared state</li><li>The agent gets only the scope handoff; there are no earlier agents to read</li></ul></td><td><span class="pill ext">extend</span></td></tr>
+            <td><ul><li>Its agent runs alongside the other explorers; its review merges in the context stage</li><li>The agent gets only the scout's handoff</li></ul></td><td><span class="pill ext">extend</span></td></tr>
           <tr><td>Code</td><td>code stage + <code>code-analyst</code>: discovery, keyword sweep, extract-code</td>
-            <td><ul><li>Stops receiving requirement scenario titles (see below)</li><li>Writes <code>code.json</code></li></ul></td><td><span class="pill reuse">reuse</span></td></tr>
+            <td><ul><li>Unchanged; its stage still runs before the explorer agents start, so it still sees the story scenario titles</li></ul></td><td><span class="pill reuse">reuse</span></td></tr>
           <tr><td>UI</td><td>Nothing</td>
             <td><ul><li>New <code>ui-explorer</code> agent with Playwright MCP added to <code>.mcp.json</code> (local stdio, so it works headless)</li><li>Opens the module's screens on the test env and records fields, validations, buttons, states and permission gates</li><li>Writes <code>ui.json</code>: scenarios with <code>source: "ui"</code>, each with a screenshot or snapshot path as evidence</li></ul></td><td><span class="pill new">new</span></td></tr>
           <tr><td>Zephyr + QA</td><td>Spread out: export in scope, candidate selection and step fetching in match</td>
             <td><ul><li>A new stage collects them: export, linked cases, module folder, keyword hits, steps</li><li>Writes <code>zephyr.json</code>. Mostly a move of <code>zephyr.mjs</code> + <code>candidates.mjs</code></li></ul></td><td><span class="pill new">new</span></td></tr>
           <tr><td>Context builder</td><td>Match stage compares scenarios with candidates per story</td>
-            <td><ul><li>Script: joins the four files per requirement and removes duplicate scenarios across sources (0 tokens)</li><li>LLM: judges coverage per item, reusing <code>prompts/match.md</code> with UI evidence added</li><li>Writes <code>context.json</code>, the single input for everything after it</li></ul></td><td><span class="pill new">new</span></td></tr>
+            <td><ul><li>The context stage merges the four review files: story and code scenarios, UI scenarios and observations, Zephyr candidates</li><li>The match LLM judges coverage per scenario, now with UI evidence</li><li>The <code>context-builder</code> agent checks where sources disagree and verifies doubtful verdicts</li></ul></td><td><span class="pill new">new</span></td></tr>
           <tr><td>Test design</td><td>Draft stage + <code>test-designer</code></td>
             <td><ul><li>Reads <code>context.json</code> and drafts only Partial / Uncovered items</li></ul></td><td><span class="pill reuse">reuse</span></td></tr>
           <tr><td>Coverage validator</td><td><code>coverage-matcher</code> re-checks verdicts before drafting</td>
             <td><ul><li>Moves after drafting: checks each draft against Zephyr for duplicates, and that every uncovered item has a draft</li><li>Sends rejected drafts back to test design once, then reports what is left</li></ul></td><td><span class="pill new">new</span></td></tr>
           <tr><td>Gap report</td><td>Report stage: workbook + <code>summary.md</code></td>
-            <td><ul><li>Adds a JSON export next to the Excel file</li><li>Adds a UI evidence column and a "validated" column</li></ul></td><td><span class="pill ext">extend</span></td></tr>
+            <td><ul><li>Adds a JSON export next to the Excel file</li><li>Adds a Validation column; UI checks show in Agent review</li></ul></td><td><span class="pill ext">extend</span></td></tr>
         </tbody>
       </table>
     </div>
@@ -270,43 +273,42 @@ summary:focus-visible { outline: 2px solid var(--agent-edge); outline-offset: 3p
 
   <section>
     <div class="prose">
-      <h2>What breaks when the explorers run in parallel</h2>
-      <p>Today's chain relies on its order in four places. Each needs a fix before the fan-out works.</p>
+      <h2>How the parallel run stays consistent</h2>
+      <p>The old chain relied on its order in four places. This is how each one is handled now.</p>
     </div>
     <div class="breaks">
-      <div><h3>Code reads requirement output</h3><p>The code stage sends the story scenario titles to the LLM so it can skip duplicates (<code>stages.mjs:276</code>).</p><p class="fix">Drop the titles from <code>extract-code</code> and remove duplicates in the context builder.</p></div>
-      <div><h3>All stages write state.json</h3><p>Every stage loads, mutates and saves the same file. Two explorers saving at once overwrite each other.</p><p class="fix">Each explorer writes only its own file. The context builder is the only stage that combines them.</p></div>
-      <div><h3>Reviews merge into the next stage</h3><p><code>reviews.mjs</code> applies agent N's review when stage N+1 runs. With four explorers there's no single next stage.</p><p class="fix">Each explorer applies its own agent's review into its output file before the context builder reads it.</p></div>
-      <div><h3>Handoffs are a chain</h3><p><code>agents.mjs</code> passes every earlier agent's findings forward, and the token budget is checked between agents.</p><p class="fix">Explorers get only the scope handoff. The context builder gets all four. Check the budget before the fan-out and give each explorer its own cap.</p></div>
+      <div><h3>Code reads requirement output</h3><p>The code stage sends the story scenario titles to the LLM so it can skip duplicates (<code>stages.mjs:276</code>).</p><p class="fix">Only the agents run in parallel. The script stages still run one after another, so the code stage still gets the titles.</p></div>
+      <div><h3>All stages write state.json</h3><p>Every stage loads, mutates and saves the same file. Two explorers saving at once overwrite each other.</p><p class="fix">Agents never write <code>state.json</code>. Only the orchestrator's stages do, one at a time.</p></div>
+      <div><h3>Reviews merge into the next stage</h3><p><code>reviews.mjs</code> applies agent N's review when stage N+1 runs. With four explorers there's no single next stage.</p><p class="fix">All four explorer reviews merge in the context stage.</p></div>
+      <div><h3>Handoffs are a chain</h3><p><code>agents.mjs</code> passes every earlier agent's findings forward, and the token budget is checked between agents.</p><p class="fix">Each agent gets the handoffs of every earlier phase, so the explorers see the scout's and the context-builder sees all four. The token budget is checked before each phase.</p></div>
     </div>
   </section>
 
   <section>
     <div class="prose">
-      <h2>Decisions still open</h2>
+      <h2>Still to do</h2>
     </div>
     <ol class="questions">
-      <li><b>env.yaml.</b> What goes in it? Proposed: UI base URL per environment, a login method (saved browser session or user and password from <code>.env</code>), and the Playwright options. Secrets stay in <code>.env</code>.</li>
-      <li><b>Baseline.</b> Does it mean "only stories changed since the last run", or "the last run's results to diff against"?</li>
-      <li><b>UI safety.</b> Read-only exploration (navigate, open dialogs, trigger client-side validation, never save, submit or delete) or full actions on a dedicated test env? Read-only is safer and should be enforced in the tool allowlist, not only in the prompt.</li>
-      <li><b>UI token cost.</b> A browser snapshot costs roughly 5–20k tokens per page. Should UI exploration run on every run or behind an opt-in flag with its own budget?</li>
-      <li><b>Context builder.</b> Is it a script plus one LLM call, as proposed, or an agent that can also reason over the joined context?</li>
+      <li><b>Test environment.</b> Put the real AVL test URL in <code>environments.test.uiBaseUrl</code>, then run <code>npm run ui-login</code> once to save the session.</li>
+      <li><b>Calibration run.</b> One real run on AVLN-2398 (about 60k tokens) to confirm UC-01 still matches QA-T10855, QA-T10856 and QA-T10858.</li>
+      <li><b>First live UI run.</b> Tune <code>maxPages</code>, and add <code>allowedWriteUrls</code> if the grids send their searches as POST.</li>
+      <li><b>Baseline.</b> Built as "only stories updated since the last finished run of the same scope" (<code>scope.baseline: last-run</code>). Say if you meant something else.</li>
     </ol>
   </section>
 
   <section>
     <div class="prose">
       <h2>Where to make a change</h2>
-      <p>Project facts live only in <code>profiles/&lt;name&gt;/</code>; everything under <code>scripts/</code> stays project-agnostic. Items marked new are files to create.</p>
+      <p>Project facts live only in <code>profiles/&lt;name&gt;/</code>; everything under <code>scripts/</code> stays project-agnostic.</p>
     </div>
     <div class="changes">
-      <div><h3>Environment and login (new)</h3><p><code>profiles/avl/env.yaml</code>; secrets in <code>.env</code></p></div>
-      <div><h3>Playwright MCP (new)</h3><p>Add a <code>playwright</code> server to <code>.mcp.json</code>; add its tools to the <code>ui-explorer</code> entry in <code>allowedTools()</code></p></div>
-      <div><h3>UI explorer (new)</h3><p><code>.claude/agents/ui-explorer.md</code>, <code>schema/review/ui.schema.json</code></p></div>
-      <div><h3>Fan-out orchestration</h3><p><code>scripts/agents.mjs</code>: <code>CHAIN</code> becomes scope → parallel explorers → context → design → validate → report</p></div>
-      <div><h3>Context builder (new)</h3><p>A new stage in <code>scripts/lib/stages.mjs</code>, <code>prompts/match.md</code> extended with UI evidence</p></div>
+      <div><h3>Environment and login</h3><p><code>environments</code> in <code>config/config.yaml</code>; save a login with <code>npm run ui-login</code></p></div>
+      <div><h3>UI mode and Playwright</h3><p><code>agents.ui-explorer</code> in config.yaml; tools per mode in <code>uiTools()</code>, <code>scripts/lib/pipeline.mjs</code>. The MCP config is generated per run.</p></div>
+      <div><h3>Which agents run</h3><p><code>pipeline</code> in <code>config/config.yaml</code>; the agent registry is <code>AGENTS</code> in <code>scripts/lib/pipeline.mjs</code></p></div>
+      <div><h3>Scope filters</h3><p><code>scope.statusCategories</code> and <code>scope.baseline</code> in config.yaml</p></div>
+      <div><h3>How reviews merge</h3><p><code>scripts/lib/reviews.mjs</code>; schemas in <code>schema/review/</code></p></div>
       <div><h3>A module's keywords, folder or stories</h3><p><code>profiles/avl/modules.json</code>, or <code>vocab.mjs --save</code></p></div>
-      <div><h3>Models, batch sizes, caps, token budget</h3><p><code>config/run.json</code></p></div>
+      <div><h3>Models, batch sizes, caps, token budget</h3><p><code>config/config.yaml</code></p></div>
       <div><h3>What an LLM stage asks or returns</h3><p><code>prompts/&lt;stage&gt;.md</code> plus schema, then <code>node scripts/gen-llm-schemas.mjs</code></p></div>
       <div><h3>An agent's instructions and tools</h3><p><code>.claude/agents/&lt;name&gt;.md</code> (keep <code>StructuredOutput</code>), <code>allowedTools()</code></p></div>
       <div><h3>Workbook and JSON output</h3><p><code>scripts/lib/workbook.mjs</code>, <code>scripts/lib/report.mjs</code></p></div>

@@ -1,0 +1,46 @@
+{
+  "type": "object",
+  "properties": {
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "storyKey": { "type": "string", "description": "Story to attach to; omit to attach to the module's main story." },
+          "title": { "type": "string" },
+          "flow": { "enum": ["main", "alt", "exception"] },
+          "type": { "enum": ["positive", "negative", "boundary", "permission", "validation", "integration"] },
+          "steps": { "type": "array", "items": { "type": "string" } },
+          "expected": { "type": "string" },
+          "evidence": {
+            "type": "object",
+            "properties": {
+              "url": { "type": "string" },
+              "element": { "type": "string", "description": "What was seen: control label, message text, column name." },
+              "screenshot": { "type": "string" }
+            },
+            "required": ["url"],
+            "additionalProperties": false
+          },
+          "reasoning": { "type": "string" }
+        },
+        "required": ["title", "flow", "type", "steps", "expected", "evidence", "reasoning"],
+        "additionalProperties": false
+      }
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Expected scenario id (story or code)." },
+          "status": { "enum": ["observed", "not-found", "different"] },
+          "reasoning": { "type": "string" }
+        },
+        "required": ["id", "status", "reasoning"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

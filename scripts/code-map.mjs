@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Implementation map preview (0 tokens): shows which files the code stage would send for one module and why.
-//   node scripts/code-map.mjs --module export-job            (profile defaults to config/run.json)
+//   node scripts/code-map.mjs --module export-job            (profile defaults to config/config.yaml)
 //   node scripts/code-map.mjs --module export-job --show core (print the packed content of one role)
 //   node scripts/code-map.mjs --module "grid export" --keywords "export to excel" (keyword sweep: configured + extra words)
 import path from "node:path";

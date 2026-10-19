@@ -1,15 +1,15 @@
 ---
-description: Run the coverage agent chain for the module in config/run.json (or a module or feature named in plain words, e.g. /coverage conductor, /coverage grid data export)
+description: Run the coverage agent pipeline for the module in config/config.yaml (or a module or feature named in plain words, e.g. /coverage conductor, /coverage grid data export)
 argument-hint: [module or feature in plain words] [--keywords "a,b"] [--limit n] [--from <agent>] [--skip <agent>] [--no-rovo] [--rediscover]
 allowed-tools: Bash(node scripts/agents.mjs *), Bash(node scripts/modules.mjs *), Bash(node scripts/vocab.mjs *), Read, Write(./runs/*/rovo/*.json), mcp__claude_ai_Atlassian_Rovo__search, AskUserQuestion
 ---
-Run the coverage agent chain. Arguments: $ARGUMENTS
+Run the coverage agent pipeline. Arguments: $ARGUMENTS
 
 The words can name a page module ("import job") or a cross-cutting feature with no folder of its own
 ("grid data export"). Before the agents run, steps 0–1 decide WHAT is analysed: the module, its keywords
 and its Zephyr folder, all checked against the code, the Jira stories and the Zephyr cases.
 
-Profile = `defaultProfile` in config/run.json. Module words = the words in the arguments, else `defaultModule`.
+Profile = `defaultProfile` in config/config.yaml. Module words = the words in the arguments, else `defaultModule`.
 Skip steps 0–1 when resuming with `--from`.
 
 0. **Rovo search** (skip with `--no-rovo`). The agents run headless and cannot use the claude.ai Atlassian
@@ -38,7 +38,10 @@ Skip steps 0–1 when resuming with `--from`.
    `--module` only when the arguments named no module), plus `--extra-stories runs/<profile>/rovo/<slug>.json`
    when step 0 found stories, and any `--keywords`, `--limit`, `--from` or `--skip` options from the arguments.
    Use a 60-minute timeout.
-   The chain is: module-scout → requirements-analyst → code-analyst → coverage-matcher → test-designer → reporter.
+   The pipeline (config/config.yaml) is: module-scout → requirements-analyst + code-analyst + ui-explorer +
+   zephyr-explorer (in parallel) → context-builder → test-designer → coverage-validator → reporter. Pass `--env` when
+   the arguments name an environment. If the run says the UI explorer could not start (no saved login), tell the
+   user to run `npm run ui-login` and that the rest of the run went on without the UI.
    It derives expected scenarios from the stories (UC docs, acceptance criteria) and from the frontend and
    backend code, matches them with the existing Zephyr cases (the linked ones, the module's Zephyr folder and
    cases named by its keywords), and drafts the missing test cases.

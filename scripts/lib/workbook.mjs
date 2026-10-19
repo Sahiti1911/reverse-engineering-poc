@@ -122,8 +122,8 @@ export async function buildWorkbook({ file, profile, scope, stories, zephyr, tok
         steps: (e.steps ?? []).map((x, i) => `${i + 1}. ${x}`).join("\n"), expected: e.expected,
         evidence: ev ? `${ev.path}${ev.symbol ? ` :: ${ev.symbol}` : ""}${ev.detail ? ` — ${ev.detail}` : ""}` : e.evidence,
         evidenceUrl: ev ? urls.code(e.repo, ev.path) : null,
-        codeOnly: e.codeOnly ? "Yes — verify intended behaviour" : "No",
-        agentReview: [dropped ? `dropped by ${e.droppedBy}` : "", e.addedBy ? `added by ${e.addedBy}` : "", e.codeReview ?? "", e.suspectedBug ? "SUSPECTED BUG" : ""].filter(Boolean).join("; "),
+        codeOnly: e.codeOnly ? "Yes — verify intended behaviour" : e.uiOnly ? "UI only — verify intended behaviour" : "No",
+        agentReview: [dropped ? `dropped by ${e.droppedBy}` : "", e.addedBy ? `added by ${e.addedBy}` : "", e.codeReview ?? "", e.suspectedBug ? "SUSPECTED BUG" : "", e.uiCheck ? `UI ${e.uiCheck}` : ""].filter(Boolean).join("; "),
         reasoning: e.reasoning,
       });
     }
@@ -186,7 +186,8 @@ export async function buildWorkbook({ file, profile, scope, stories, zephyr, tok
         folderId: d.folderId ?? "", folderPath: d.folderPath ?? "", folderReasoning: d.folderReasoning ?? "",
         name: d.name ?? "", objective: d.objective ?? "", precondition: d.precondition ?? "", steps: formatSteps(d.steps), bdd: d.bdd ?? "",
         labels: (d.labels ?? []).join(", "), gapReasoning: g.reasoning,
-        agentReview: [g.codeReview, g.suspectedBug ? "SUSPECTED BUG" : "", g.draftEditedBy ? `draft edited by ${g.draftEditedBy}` : ""].filter(Boolean).join("; "),
+        agentReview: [g.codeReview, g.suspectedBug ? "SUSPECTED BUG" : "", g.draftEditedBy ? `draft edited by ${g.draftEditedBy}` : "", g.uiCheck ? `UI ${g.uiCheck}` : ""].filter(Boolean).join("; "),
+        validation: g.validation ? `${g.validation.verdict}${g.validation.duplicateOf?.length ? ` of ${g.validation.duplicateOf.join(", ")}` : ""} (${g.validation.by}): ${g.validation.reasoning}` : "",
         suggested: d.suggestedDecision ?? "Review", decisionReasoning: d.decisionReasoning ?? g.draftError ?? "",
         decision: g.reviewDecision ?? (d.suggestedDecision === "Approve" ? "Approve" : d.suggestedDecision === "Reject" ? "Reject" : "Review"),
         notes: g.notes ?? "", createdKey: g.createdKey ?? "", createdUrl: g.createdKey ? urls.zephyr(g.createdKey) : null,
@@ -283,7 +284,7 @@ export async function buildWorkbook({ file, profile, scope, stories, zephyr, tok
   }
   ws.addRow([]);
 
-  title("Efficiency (use these to tune config/run.json)");
+  title("Efficiency (use these to tune config/config.yaml)");
   const per = (n, t = tt.total_tokens) => (n ? Math.round(t / n) : "");
   header(["Metric", "Total tokens", "Pipeline tokens", "Agent tokens"]);
   for (const [label, n] of [["per story in scope", total.stories], ["per testable story", total.testable], ["per expected scenario", total.expected], ["per gap found", total.gaps]]) {
@@ -314,7 +315,7 @@ export async function buildWorkbook({ file, profile, scope, stories, zephyr, tok
     { header: "Source", key: "source", width: 10 }, { header: "UC / flow", key: "uc", width: 14 }, { header: "Scenario", key: "scenario", width: 45, wrap: true },
     { header: "Type", key: "type", width: 12 }, { header: "Priority hint", key: "priorityHint", width: 10 }, { header: "Steps", key: "steps", width: 50, wrap: true },
     { header: "Expected", key: "expected", width: 40, wrap: true }, { header: "Evidence", key: "evidence", width: 45, wrap: true, link: "evidenceUrl" },
-    { header: "Code-only?", key: "codeOnly", width: 16 }, { header: "Agent review", key: "agentReview", width: 26, wrap: true },
+    { header: "Code / UI only?", key: "codeOnly", width: 16 }, { header: "Agent review", key: "agentReview", width: 26, wrap: true },
     { header: "Derivation reasoning", key: "reasoning", width: 70, wrap: true },
   ], expectedRows);
 
@@ -338,6 +339,7 @@ export async function buildWorkbook({ file, profile, scope, stories, zephyr, tok
     { header: "Scenario", key: "scenario", width: 40, wrap: true }, { header: "Source", key: "source", width: 9 }, { header: "Type", key: "type", width: 11 },
     { header: "Verdict", key: "verdict", width: 10, color: true }, { header: "Partially covered by", key: "matched", width: 14 },
     { header: "Why it is a gap", key: "gapReasoning", width: 50, wrap: true }, { header: "Agent review", key: "agentReview", width: 24, wrap: true },
+    { header: "Validation", key: "validation", width: 40, wrap: true },
     { header: "Suggested decision", key: "suggested", width: 11, color: true }, { header: "Decision reasoning", key: "decisionReasoning", width: 50, wrap: true },
     { header: "Review decision", key: "decision", width: 11, color: true }, { header: "Reviewer notes", key: "notes", width: 30, wrap: true },
     { header: "Action", key: "action", width: 8 }, { header: "Extend key", key: "extendKey", width: 12 },

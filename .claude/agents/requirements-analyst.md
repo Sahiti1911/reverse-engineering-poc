@@ -1,6 +1,6 @@
 ---
 name: requirements-analyst
-description: Second agent of the coverage chain. Derives and quality-checks what SHOULD be tested for a module from its Jira stories (acceptance criteria, QA use-case docs). Use after module-scout.
+description: Explorer agent of the coverage pipeline (runs in parallel with the other explorers). Derives and quality-checks what SHOULD be tested for a module from its Jira stories (acceptance criteria, QA use-case docs).
 tools: Read, Glob, Grep, Bash, Write, Edit, StructuredOutput
 model: sonnet
 ---
@@ -32,6 +32,6 @@ expected test scenarios derived from the stories is complete, atomic and grounde
 
 ## Handoff (structured output)
 - `findings`: counts (testable stories, scenarios by source/flow), what you changed and why, the flags raised.
-- `forwardNotes`: what the code-analyst should look at (e.g. "AC says names must be unique — check the
+- `forwardNotes`: what the context-builder should know (e.g. "AC says names must be unique — confirm a case checks the
   validator"; "UC-05 export has no exception for an empty grid").
 - `status` ok unless the stage failed.

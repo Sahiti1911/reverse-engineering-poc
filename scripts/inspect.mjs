@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // Compact, token-friendly views of a run's state for the agents (and for people).
-//   node scripts/inspect.mjs --run-dir <dir> --what stories|story|scenarios|code|matches|gaps|candidates|handoffs [--key AVLN-1] [--filter text]
+//   node scripts/inspect.mjs --run-dir <dir> --what stories|story|scenarios|code|ui|candidates|matches|gaps|validation|handoffs [--key AVLN-1] [--filter text]
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { readJson } from "./lib/util.mjs";
 
 const { values: a } = parseArgs({ options: { "run-dir": { type: "string" }, what: { type: "string" }, key: { type: "string" }, filter: { type: "string" }, max: { type: "string" } } });
 if (!a["run-dir"] || !a.what) {
-  console.error("Usage: node scripts/inspect.mjs --run-dir <dir> --what stories|story|scenarios|code|matches|gaps|candidates|handoffs [--key KEY] [--filter text] [--max n]");
+  console.error("Usage: node scripts/inspect.mjs --run-dir <dir> --what stories|story|scenarios|code|ui|candidates|matches|gaps|validation|handoffs [--key KEY] [--filter text] [--max n]");
   process.exit(2);
 }
 const runDir = path.resolve(a["run-dir"]);
@@ -41,11 +41,13 @@ switch (a.what) {
     break;
   case "scenarios":
   case "code":
+  case "ui":
     out.push("id | source | flow | type | review | title");
     for (const r of rows) {
-      for (const e of r.expected.filter((x) => (a.what === "code" ? x.codeOnly : true))) {
+      for (const e of r.expected.filter((x) => (a.what === "code" ? x.codeOnly : a.what === "ui" ? x.source === "ui" || x.uiCheck : true))) {
         const ev = typeof e.evidence === "object" ? `${e.evidence.path} :: ${e.evidence.symbol}` : cut(e.evidence, 60);
-        keep(`${e.id} | ${e.source} | ${e.flow} | ${e.type} | ${e.codeReview ?? ""}${e.suspectedBug ? " BUG?" : ""} | ${cut(e.title, 80)}${a.what === "code" ? `\n    evidence: ${ev}\n    expected: ${cut(e.expected, 160)}` : ""}`);
+        keep(`${e.id} | ${e.source} | ${e.flow} | ${e.type} | ${e.codeReview ?? ""}${e.suspectedBug ? " BUG?" : ""} | ${cut(e.title, 80)}${e.uiCheck ? `
+    ui: ${cut(e.uiCheck, 160)}` : ""}${a.what !== "scenarios" ? `\n    evidence: ${ev}\n    expected: ${cut(e.expected, 160)}` : ""}`);
       }
       for (const e of r.droppedScenarios ?? []) keep(`${e.id} | DROPPED by ${e.droppedBy} | ${cut(e.title, 80)}`);
       if (a.what === "scenarios") for (const s of r.skippedUcs ?? []) keep(`${r.story.key}:${s.uc} | SKIPPED by profile rule (manual audit, not missing) | ${cut(s.title, 80)}`);
@@ -60,7 +62,7 @@ switch (a.what) {
     }
     break;
   case "candidates":
-    for (const r of rows) for (const c of r.candidates ?? []) keep(`${r.story.key} | ${c.key} | linked=${c.linked} | ${c.why}`);
+    for (const r of rows) for (const c of r.candidates ?? []) keep(`${r.story.key} | ${c.key} | linked=${c.linked} | steps=${c.steps?.length ?? "-"} | ${cut(c.name, 70)} | ${c.why}`);
     break;
   case "gaps":
     out.push("gapId | verdict | action | priority | folderId | suggested | name");
@@ -70,6 +72,12 @@ switch (a.what) {
         keep(`${g.gapId} | ${g.verdict} | ${d.action ?? "-"}${d.extendKey ? `:${d.extendKey}` : ""} | ${d.priority ?? "-"} | ${d.folderId ?? "-"} | ${d.suggestedDecision ?? "-"} | ${cut(d.name ?? g.scenario, 90)}${g.draftError ? ` | ERROR ${g.draftError}` : ""}`);
         if (a.key) keep(`    steps: ${(d.steps ?? []).map((s, i) => `${i + 1}. ${s.description} => ${s.expectedResult}`).join(" / ")}\n    labels: ${(d.labels ?? []).join(", ")} · folder: ${d.folderPath ?? "-"}\n    why: ${cut(d.decisionReasoning, 200)}`);
       }
+    }
+    break;
+  case "validation":
+    out.push("gapId | verdict | by | duplicate of | draft name | reasoning");
+    for (const r of rows) {
+      for (const g of r.gaps ?? []) keep(`${g.gapId} | ${g.validation?.verdict ?? "-"} | ${g.validation?.by ?? "-"} | ${g.validation?.duplicateOf?.join(",") || "-"} | ${cut(g.draft?.name ?? g.scenario, 70)} | ${cut(g.validation?.reasoning, 200)}`);
     }
     break;
   case "handoffs": {
@@ -89,7 +97,13 @@ switch (a.what) {
 const live = rows.filter((r) => r.triage?.testable && !r.dropped);
 const totals = {
   stories: `TOTAL stories ${rows.length}: testable ${live.length}, not testable ${rows.filter((r) => r.triage?.testable === false && !r.dropped).length}, undecided ${rows.filter((r) => r.triage?.testable === null && !r.dropped).length}, dropped ${rows.filter((r) => r.dropped).length}`,
-  scenarios: `TOTAL expected scenarios ${live.reduce((n, r) => n + r.expected.length, 0)} (story ${live.reduce((n, r) => n + r.expected.filter((e) => !e.codeOnly).length, 0)}, code ${live.reduce((n, r) => n + r.expected.filter((e) => e.codeOnly).length, 0)}); dropped ${rows.reduce((n, r) => n + (r.droppedScenarios?.length ?? 0), 0)}`,
+  scenarios: `TOTAL expected scenarios ${live.reduce((n, r) => n + r.expected.length, 0)} (story ${live.reduce((n, r) => n + r.expected.filter((e) => e.source === "story").length, 0)}, code ${live.reduce((n, r) => n + r.expected.filter((e) => e.codeOnly).length, 0)}, ui ${live.reduce((n, r) => n + r.expected.filter((e) => e.source === "ui").length, 0)}); dropped ${rows.reduce((n, r) => n + (r.droppedScenarios?.length ?? 0), 0)}`,
+  ui: `TOTAL UI scenarios ${live.reduce((n, r) => n + r.expected.filter((e) => e.source === "ui").length, 0)}; observations ${live.reduce((n, r) => n + r.expected.filter((e) => e.uiCheck).length, 0)}`,
+  validation: (() => {
+    const g = live.flatMap((r) => r.gaps ?? []);
+    const by = (v) => g.filter((x) => x.validation?.verdict === v).length;
+    return `TOTAL gaps ${g.length}: ok ${by("ok")}, possible-duplicate ${by("possible-duplicate")}, duplicate ${by("duplicate")}, redesign ${by("redesign")}, undrafted ${by("undrafted")}`;
+  })(),
   code: `TOTAL code scenarios ${live.reduce((n, r) => n + r.expected.filter((e) => e.codeOnly).length, 0)}`,
   matches: (() => {
     const m = live.flatMap((r) => r.matches ?? []);

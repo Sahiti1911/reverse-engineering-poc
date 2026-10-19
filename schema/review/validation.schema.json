@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "properties": {
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "gapId": { "type": "string" },
+          "verdict": { "enum": ["ok", "duplicate", "redesign"] },
+          "duplicateOf": { "type": "array", "items": { "type": "string" } },
+          "reasoning": { "type": "string" }
+        },
+        "required": ["gapId", "verdict", "reasoning"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

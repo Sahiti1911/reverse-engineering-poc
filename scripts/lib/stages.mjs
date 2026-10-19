@@ -1,5 +1,6 @@
-// The six pipeline stages. Each one: apply the previous agent's review (if any), reset only its own
-// outputs, do its work, save state. Order: scope → requirements → code → match → draft → report.
+// The pipeline stages. Each one: merge the review files of the agents before it (if any), reset only its own
+// outputs, do its work, save state. Order: scope → requirements → code → zephyr → context → draft → validate → report.
+// requirements, code and zephyr feed the explorer agents, which run side by side; context merges all of them.
 import fs from "node:fs";
 import path from "node:path";
 import { ROOT, requireEnv } from "./config.mjs";
@@ -12,7 +13,8 @@ import { ensureRepo, collectModuleCode, codeUrl } from "./code.mjs";
 import { selectCandidates, folderCandidates } from "./candidates.mjs";
 import { buildWorkbook, readGapSheet } from "./workbook.mjs";
 import { writeSummary } from "./report.mjs";
-import { applyScoutReview, applyRequirementsReview, applyCodeReview, applyMatchReview, applyDraftsReview } from "./reviews.mjs";
+import { applyScoutReview, applyRequirementsReview, applyCodeReview, applyUiReview, applyZephyrReview, applyContextReview, applyDraftsReview, applyValidationReview } from "./reviews.mjs";
+import { validateGap } from "./validate.mjs";
 import { chunk, promisePool, truncate, hash, writeJson, readJson } from "./util.mjs";
 
 const blankResult = (story, triage) => ({
@@ -22,11 +24,21 @@ const blankResult = (story, triage) => ({
 
 // ---------------------------------------------------------------- 1. scope
 export async function scopeStage(ctx, { scopeArg, since, keywords, extraStories, limit, remember }) {
-  const { profile } = ctx;
+  const { profile, cfg } = ctx;
   requireEnv("ATLASSIAN_EMAIL", "ATLASSIAN_API_TOKEN", "ZEPHYR_API_TOKEN");
-  const scope = resolveScope(scopeArg, profile, { since, keywords, extraStories });
+  const statusCategories = cfg.scope.statusCategories ?? [];
+  let scope = resolveScope(scopeArg, profile, { since, keywords, extraStories, statusCategories });
+  // Baseline: only stories updated since the previous finished run of the same scope.
+  const baselineMode = cfg.scope.baseline ?? "none";
+  if (!["none", "last-run"].includes(baselineMode)) throw new Error(`config.yaml: scope.baseline must be none or last-run (got '${baselineMode}').`);
+  let baselineNote = "";
+  if (baselineMode === "last-run" && !since) {
+    const last = readBaseline(profile.name)[scope.baselineKey];
+    if (last) scope = resolveScope(scopeArg, profile, { since: last.slice(0, 10), keywords, extraStories, statusCategories });
+    baselineNote = last ? ` | baseline: updated since last run ${last.slice(0, 10)}` : " | baseline: no earlier run of this scope, analysing all";
+  }
   ctx.state.scope = scope;
-  ctx.step("scope", { notes: `JQL: ${scope.jql}${scope.moduleFilter ? ` | module: ${scope.moduleFilter} | keywords: ${scope.keywords.join(", ")}` : ""}${ctx.dryRun ? " | DRY RUN" : ""}` });
+  ctx.step("scope", { notes: `JQL: ${scope.jql}${scope.moduleFilter ? ` | module: ${scope.moduleFilter} | keywords: ${scope.keywords.join(", ")}` : ""}${baselineNote}${ctx.dryRun ? " | DRY RUN" : ""}` });
 
   const raw = await ctx.jira.search(scope.jql, { onPage: (n) => ctx.log(`Jira: ${n} issues fetched…`) });
   const override = scope.moduleFilter ? { module: scope.moduleFilter, keywords: scope.keywords } : null;
@@ -119,6 +131,10 @@ function linkCheck(ctx, zephyr) {
   const none = relevant.filter((r) => !r.linkCheck.linkedKeys.length).length;
   ctx.step("link-check", { in: relevant.length, out: none, notes: `${none} of ${relevant.length} (possibly) testable stories have no linked Zephyr case.` });
 }
+
+const baselineFile = (profileName) => path.join(ROOT, "runs", profileName, "baseline.json");
+/** { <scope baselineKey>: <ISO time of the last finished run> } */
+export const readBaseline = (profileName) => readJson(baselineFile(profileName), {});
 
 /** --remember: store the module's keywords in modules.json so the next run needs none. */
 function rememberKeywords(ctx, scope) {
@@ -237,7 +253,7 @@ export async function requirementsStage(ctx) {
 // ---------------------------------------------------------------- 3. code
 export async function codeStage(ctx) {
   const { profile, cfg } = ctx;
-  applyRequirementsReview(ctx);
+  // The explorers run side by side: the requirements review is merged later, by the context stage.
   ctx.clearErrors("code");
   for (const r of ctx.stories) r.expected = r.expected.filter((e) => !e.codeOnly);
 
@@ -316,59 +332,103 @@ export function repoInfosFor(ctx, { checkout = true } = {}) {
   return infos;
 }
 
-// ---------------------------------------------------------------- 4. match
-export async function matchStage(ctx) {
-  const { profile, cfg } = ctx;
-  applyCodeReview(ctx);
-  ctx.clearErrors("match");
-  for (const r of ctx.stories) Object.assign(r, { candidates: [], matches: [], auditMatches: [], orphans: [] });
+// ---------------------------------------------------------------- 4. zephyr
+/** The Zephyr explorer's material: candidate cases per story with their steps (0 tokens). */
+export async function zephyrStage(ctx) {
+  ctx.clearErrors("zephyr");
   const zephyr = await ctx.zephyr();
-  const autoAccept = cfg.matching.autoAcceptConfidence ?? ["High"];
-  // Module scope: the module's Zephyr folder and keywords point to its existing tests (linked or not).
+  const moduleHint = moduleHintFor(ctx);
+  for (const r of ctx.stories) Object.assign(r, { candidates: [], candidatesReady: false });
+  await promisePool(ctx.testable(), ctx.concurrency, (r) => collectCandidates(ctx, r, zephyr, moduleHint));
+  const live = ctx.testable().filter((r) => r.expected.length);
+  const total = live.reduce((n, r) => n + r.candidates.length, 0);
+  ctx.step("zephyr", { in: live.length, out: total, notes: `${total} candidate case(s) with steps for ${live.length} story(ies); ${live.filter((r) => !r.candidates.length).length} story(ies) have none.` });
+  ctx.markDone("zephyr");
+}
+
+function moduleHintFor(ctx) {
   const scope = ctx.state.scope;
-  const moduleHint = scope?.moduleFilter ? { path: scope.moduleFilter, zephyrFolder: profile.modules?.[scope.moduleFilter]?.zephyrFolder, rx: keywordRegex(scope.keywords ?? []) } : null;
+  return scope?.moduleFilter ? { path: scope.moduleFilter, zephyrFolder: ctx.profile.modules?.[scope.moduleFilter]?.zephyrFolder, rx: keywordRegex(scope.keywords ?? []) } : null;
+}
+
+async function collectCandidates(ctx, r, zephyr, moduleHint) {
+  r.candidates = r.expected.length
+    ? selectCandidates({ story: r.story, zephyr, expected: r.expected, limits: ctx.cfg.limits, module: r.story.module === moduleHint?.path ? moduleHint : null })
+    : [];
+  r.candidatesReady = true;
+  await withSteps(ctx, r, zephyr);
+}
+
+/** Fill name, folder, objective and steps of every candidate that has none yet (agent-added ones too). */
+async function withSteps(ctx, r, zephyr) {
+  const todo = r.candidates.filter((c) => !c.steps);
+  await promisePool(todo, 4, async (c) => {
+    const z = zephyr.byKey.get(c.key);
+    let steps = [];
+    try {
+      steps = await getSteps({ profile: ctx.profile, cacheDir: ctx.cacheDir, key: c.key, maxAgeHours: ctx.cfg.zephyr.stepsMaxAgeHours });
+    } catch (err) {
+      r.errors.push(`zephyr: steps of ${c.key}: ${err.message.slice(0, 120)}`);
+    }
+    Object.assign(c, {
+      name: z.name, folder: z.folderPath, objective: truncate(z.objective, 400), precondition: truncate(z.precondition, 200),
+      steps: steps.slice(0, 12).map((x) => ({ action: truncate(x.description, 200), expected: truncate(x.expectedResult, 200) })),
+    });
+  });
+}
+
+// ---------------------------------------------------------------- 5. context
+/**
+ * Joins the four explorers: merges their reviews (requirements, code, UI scenarios and observations, Zephyr
+ * candidates), then judges per scenario whether existing cases cover it (Covered / Partial / Missing).
+ */
+export async function contextStage(ctx) {
+  const { profile, cfg } = ctx;
+  applyRequirementsReview(ctx);
+  applyCodeReview(ctx);
+  applyUiReview(ctx);
+  const zephyr = await ctx.zephyr();
+  applyZephyrReview(ctx, zephyr);
+  ctx.clearErrors("context");
+  for (const r of ctx.stories) Object.assign(r, { matches: [], auditMatches: [], orphans: [] });
+  const autoAccept = cfg.matching.autoAcceptConfidence ?? ["High"];
+  const moduleHint = moduleHintFor(ctx);
+  // Stories made testable by a review need a link check, and candidates if the zephyr stage did not cover them.
+  linkCheck(ctx, zephyr);
 
   await promisePool(ctx.testable(), ctx.concurrency, async (r) => {
     const s = r.story;
     if (!r.expected.length) return;
-    r.candidates = selectCandidates({ story: s, zephyr, expected: r.expected, limits: cfg.limits, module: s.module === moduleHint?.path ? moduleHint : null });
+    if (!r.candidatesReady) await collectCandidates(ctx, r, zephyr, moduleHint);
+    else await withSteps(ctx, r, zephyr);
     if (!r.candidates.length) {
       r.matches = r.expected.map((e) => ({
         expectedId: e.id, verdict: "Missing", matchedKeys: [], confidence: "High", missingAspects: "", autoAccepted: false, decidedBy: "rule",
         reasoning: `No Zephyr case is linked to ${s.key} or its related stories, and no case under "${profile.zephyr.folderRoot}" shares at least two name keywords with it (${zephyr.inScopeCases.length} cases searched), so nothing can cover this scenario.`,
       }));
-      ctx.step("match", { batch: s.key, in: r.expected.length, out: 0, notes: "No candidates: all scenarios Missing (0 tokens)." });
+      ctx.step("context", { batch: s.key, in: r.expected.length, out: 0, notes: "No candidates: all scenarios Missing (0 tokens)." });
       return;
     }
-    const withSteps = await promisePool(r.candidates, 4, async (c) => {
-      const z = zephyr.byKey.get(c.key);
-      let steps = [];
-      try {
-        steps = await getSteps({ profile, cacheDir: ctx.cacheDir, key: c.key, maxAgeHours: cfg.zephyr.stepsMaxAgeHours });
-      } catch (err) {
-        r.errors.push(`match: steps of ${c.key}: ${err.message.slice(0, 120)}`);
-      }
-      return {
-        key: c.key, linked: c.linked, name: z.name, folder: z.folderPath, objective: truncate(z.objective, 400), precondition: truncate(z.precondition, 200),
-        steps: steps.slice(0, 12).map((x) => ({ action: truncate(x.description, 200), expected: truncate(x.expectedResult, 200) })),
-      };
-    });
+    const candidates = r.candidates.map(({ key, linked, name, folder, objective, precondition, steps }) => ({ key, linked, name, folder, objective, precondition, steps }));
     // Skipped UCs (e.g. legacy parity, WCAG) go in as audit-only items so their cases aren't reported as orphans.
     // Off-topic UCs of a cross-cutting module's host page are not audited: their cases belong to that page.
     const audit = r.skippedUcs.filter((sk) => !sk.offTopic).map((sk) => ({ id: `${s.key}:${sk.uc}:audit`, title: sk.title, flow: "main", type: "audit", auditOnly: true, steps: [], expected: "" }));
-    const expected = [...r.expected.map((e) => ({ id: e.id, title: e.title, flow: e.flow, type: e.type, steps: e.steps, expected: e.expected })), ...audit];
-    const input = { story: { key: s.key, summary: s.summary }, expected, candidates: withSteps };
+    const expected = [
+      ...r.expected.map((e) => ({ id: e.id, title: e.title, flow: e.flow, type: e.type, steps: e.steps, expected: e.expected, ...(e.source === "ui" && { source: "ui" }), ...(e.uiCheck && { uiCheck: e.uiCheck }) })),
+      ...audit,
+    ];
+    const input = { story: { key: s.key, summary: s.summary }, expected, candidates };
     try {
       const res = await ctx.llmRun("match", {
         cacheKey: `match-${s.key}`, fingerprint: input, prompt: JSON.stringify(input), jiraKeys: [s.key], module: s.module,
         itemsIn: expected.length, countOut: (o) => o.matches.length,
       });
-      if (!res.output) { r.errors.push(`match: ${ctx.skipReason(res)}`); return; }
+      if (!res.output) { r.errors.push(`context: ${ctx.skipReason(res)}`); return; }
       const candidateKeys = new Set(r.candidates.map((c) => c.key));
       const linkedKeys = new Set(r.candidates.filter((c) => c.linked).map((c) => c.key));
       r.matches = r.expected.map((e) => {
         const m = res.output.matches.find((x) => x.expectedId === e.id);
-        if (!m) return { expectedId: e.id, verdict: "Missing", matchedKeys: [], confidence: "Low", missingAspects: "", autoAccepted: false, decidedBy: "fallback", reasoning: "The match stage returned no verdict for this scenario; treated as Missing so it gets reviewed." };
+        if (!m) return { expectedId: e.id, verdict: "Missing", matchedKeys: [], confidence: "Low", missingAspects: "", autoAccepted: false, decidedBy: "fallback", reasoning: "The context stage returned no verdict for this scenario; treated as Missing so it gets reviewed." };
         const matchedKeys = m.matchedKeys.filter((k) => candidateKeys.has(k));
         return { ...m, matchedKeys, autoAccepted: m.verdict === "Covered" && autoAccept.includes(m.confidence), decidedBy: "LLM" };
       });
@@ -382,10 +442,10 @@ export async function matchStage(ctx) {
       });
       r.orphans = res.output.orphans.filter((o) => linkedKeys.has(o.key));
       const counts = ["Covered", "Partial", "Missing"].map((v) => `${v} ${r.matches.filter((m) => m.verdict === v).length}`).join(", ");
-      ctx.step("match", { batch: s.key, in: expected.length, out: r.matches.length, notes: `${res.reused ? "cache; " : ""}${r.candidates.length} candidates (${linkedKeys.size} linked) → ${counts}; ${r.orphans.length} orphan(s).` });
+      ctx.step("context", { batch: s.key, in: expected.length, out: r.matches.length, notes: `${res.reused ? "cache; " : ""}${r.candidates.length} candidates (${linkedKeys.size} linked) → ${counts}; ${r.orphans.length} orphan(s).` });
     } catch (err) {
-      r.errors.push(`match: failed: ${err.message.slice(0, 200)}`);
-      ctx.step("match", { batch: s.key, in: expected.length, errors: err.message.slice(0, 300) });
+      r.errors.push(`context: failed: ${err.message.slice(0, 200)}`);
+      ctx.step("context", { batch: s.key, in: expected.length, errors: err.message.slice(0, 300) });
     }
   });
   // A linked case matched by a sibling story in this run (e.g. the TESTING story of a dev story) is not an orphan.
@@ -396,14 +456,14 @@ export async function matchStage(ctx) {
     r.orphans = r.orphans.filter((o) => !matchedAnywhere.has(o.key));
     cleared += before - r.orphans.length;
   }
-  if (cleared) ctx.step("match", { batch: "(all)", notes: `${cleared} orphan(s) removed: they match scenarios of another story in this run.` });
-  ctx.markDone("match");
+  if (cleared) ctx.step("context", { batch: "(all)", notes: `${cleared} orphan(s) removed: they match scenarios of another story in this run.` });
+  ctx.markDone("context");
 }
 
-// ---------------------------------------------------------------- 5. draft
+// ---------------------------------------------------------------- 6. draft
 export async function draftStage(ctx) {
   const { profile, cfg } = ctx;
-  applyMatchReview(ctx);
+  applyContextReview(ctx);
   ctx.clearErrors("draft");
   for (const r of ctx.stories) r.gaps = [];
   const zephyr = await ctx.zephyr();
@@ -421,7 +481,8 @@ export async function draftStage(ctx) {
       return {
         gapId: `GAP-${m.expectedId.replace(/:/g, "-")}`, expectedId: m.expectedId, scenario: e.title, source: e.source, type: e.type, verdict,
         matchedKeys: m.matchedKeys, missingAspects: m.missingAspects, codeReview: e.codeReview ?? "", suspectedBug: !!e.suspectedBug,
-        reasoning: `${why}${m.missingAspects ? ` Missing: ${m.missingAspects}` : ""}${e.codeOnly ? " (Code-only scenario.)" : ""}`,
+        uiCheck: e.uiCheck ?? "",
+        reasoning: `${why}${m.missingAspects ? ` Missing: ${m.missingAspects}` : ""}${e.codeOnly ? " (Code-only scenario.)" : ""}${e.source === "ui" ? " (Seen in the UI only.)" : ""}`,
       };
     });
     const folders = folderCandidates({ story: s, candidates: r.candidates, zephyr, profile, limit: cfg.limits.folderCandidates });
@@ -460,11 +521,47 @@ export async function draftStage(ctx) {
   ctx.markDone("draft");
 }
 
-// ---------------------------------------------------------------- 6. report
+// ---------------------------------------------------------------- 7. validate
+/** Rule checks on the drafts (0 tokens): undrafted gaps and drafts whose name duplicates an existing case. */
+export async function validateStage(ctx) {
+  const zephyr = await ctx.zephyr();
+  applyDraftsReview(ctx, new Map(zephyr.folders.map((f) => [f.id, f.path])));
+  ctx.clearErrors("validate");
+  const minOverlap = ctx.cfg.validation.duplicateNameOverlap ?? 0.8;
+  const counts = { ok: 0, undrafted: 0, "possible-duplicate": 0 };
+  for (const r of ctx.testable()) {
+    for (const g of r.gaps ?? []) {
+      g.validation = validateGap(g, zephyr.inScopeCases, { minOverlap });
+      counts[g.validation.verdict]++;
+    }
+  }
+  ctx.step("validate", { in: Object.values(counts).reduce((a, b) => a + b, 0), out: counts.ok, notes: `Rule checks: ${counts.ok} ok, ${counts["possible-duplicate"]} possible duplicate(s), ${counts.undrafted} undrafted.` });
+  ctx.markDone("validate");
+}
+
+/** coverage.json: the machine-readable twin of the workbook (scenarios, verdicts, gaps with drafts). */
+function writeCoverageJson(ctx, stories, { workbookPath }) {
+  const file = path.join(ctx.runDir, "coverage.json");
+  writeJson(file, {
+    runAt: ctx.state.runAt, profile: ctx.profile.name, scope: { jql: ctx.state.scope.jql, module: ctx.state.scope.moduleFilter, keywords: ctx.state.scope.keywords },
+    workbook: path.basename(workbookPath),
+    stories: stories.map((r) => ({
+      key: r.story.key, summary: r.story.summary, module: r.story.module, testable: r.triage.testable, dropped: r.dropped ?? null,
+      scenarios: r.expected.map(({ id, source, flow, type, title, steps, expected, evidence, uiCheck, codeReview, suspectedBug, reasoning }) => ({ id, source, flow, type, title, steps, expected, evidence, uiCheck, codeReview, suspectedBug, reasoning })),
+      verdicts: r.matches.map(({ expectedId, verdict, confidence, matchedKeys, missingAspects, decidedBy, reasoning }) => ({ expectedId, verdict, confidence, matchedKeys, missingAspects, decidedBy, reasoning })),
+      gaps: r.gaps.map(({ gapId, expectedId, verdict, source, draft, validation, reviewDecision, createdKey, reasoning }) => ({ gapId, expectedId, verdict, source, draft, validation, reviewDecision, createdKey, reasoning })),
+    })),
+  });
+  return file;
+}
+
+// ---------------------------------------------------------------- 8. report
 export async function reportStage(ctx, { out } = {}) {
   const { profile, cfg, state } = ctx;
   const zephyr = await ctx.zephyr();
+  // Both are idempotent: drafts may not have been merged when the validate phase is switched off.
   applyDraftsReview(ctx, new Map(zephyr.folders.map((f) => [f.id, f.path])));
+  applyValidationReview(ctx);
   const scope = state.scope;
   const workbookPath = out ? path.resolve(out) : path.join(ctx.runDir, `coverage_${profile.name}_${scope.slug}.xlsx`);
 
@@ -520,8 +617,11 @@ export async function reportStage(ctx, { out } = {}) {
     throw err;
   }
   const summary = writeSummary({ ctx, built, workbookPath, handoffs });
-  return { built, workbookPath, summaryPath: summary.file };
+  const jsonPath = writeCoverageJson(ctx, ordered, { workbookPath });
+  // The baseline moves only when a real run finished without hitting the token budget.
+  if (!ctx.dryRun && !state.budgetHit && scope.baselineKey) writeJson(baselineFile(profile.name), { ...readBaseline(profile.name), [scope.baselineKey]: state.runAt });
+  return { built, workbookPath, summaryPath: summary.file, jsonPath };
 }
 
-export const STAGE_FUNCS = { scope: scopeStage, requirements: requirementsStage, code: codeStage, match: matchStage, draft: draftStage, report: reportStage };
+export const STAGE_FUNCS = { scope: scopeStage, requirements: requirementsStage, code: codeStage, zephyr: zephyrStage, context: contextStage, draft: draftStage, validate: validateStage, report: reportStage };
 export { ROOT };
