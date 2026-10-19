@@ -1,0 +1,14 @@
+{
+  "$schema": "../../schema/modules.schema.json",
+  "modules": {
+    "orders page": {
+      "path": "sales/orders",
+      "aliases": ["orders", "order list"],
+      "keywords": ["orders page", "order list", "legacy.sales.orders"],
+      "zephyrFolder": "Orders",
+      "includeStories": [],
+      "excludeStories": [],
+      "notes": "Example entry: replace with your own modules, or delete them all and start with {\"modules\": {}}."
+    }
+  }
+}

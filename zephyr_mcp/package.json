@@ -1,0 +1,22 @@
+{
+  "name": "zephyr-mcp",
+  "version": "2.0.0",
+  "description": "Stdio MCP server for reading, creating, editing and linking Zephyr Scale test cases",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "zephyr-mcp": "src/server.mjs"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "dotenv": "^18.0.8",
+    "zod": "^4.6.7"
+  }
+}

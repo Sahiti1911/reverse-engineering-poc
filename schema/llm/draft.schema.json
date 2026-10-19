@@ -1,0 +1,115 @@
+{
+  "type": "object",
+  "properties": {
+    "drafts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "gapId": {
+            "type": "string"
+          },
+          "action": {
+            "enum": [
+              "create",
+              "extend"
+            ]
+          },
+          "extendKey": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "precondition": {
+            "type": "string"
+          },
+          "priority": {
+            "enum": [
+              "Low",
+              "Medium",
+              "High",
+              "Critical"
+            ]
+          },
+          "priorityReasoning": {
+            "type": "string"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "folderId": {
+            "type": "integer"
+          },
+          "folderReasoning": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "testData": {
+                  "type": "string"
+                },
+                "expectedResult": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "description",
+                "testData",
+                "expectedResult"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "bdd": {
+            "type": "string"
+          },
+          "suggestedDecision": {
+            "enum": [
+              "Approve",
+              "Review",
+              "Reject"
+            ]
+          },
+          "decisionReasoning": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "gapId",
+          "action",
+          "extendKey",
+          "name",
+          "objective",
+          "precondition",
+          "priority",
+          "priorityReasoning",
+          "labels",
+          "folderId",
+          "folderReasoning",
+          "steps",
+          "bdd",
+          "suggestedDecision",
+          "decisionReasoning"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "drafts"
+  ],
+  "additionalProperties": false
+}

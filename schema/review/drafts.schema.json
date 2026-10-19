@@ -1,0 +1,93 @@
+{
+  "type": "object",
+  "properties": {
+    "edits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "gapId": {
+            "type": "string"
+          },
+          "reasoning": {
+            "type": "string"
+          },
+          "action": {
+            "enum": [
+              "create",
+              "extend"
+            ]
+          },
+          "extendKey": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "precondition": {
+            "type": "string"
+          },
+          "priority": {
+            "enum": [
+              "Low",
+              "Medium",
+              "High",
+              "Critical"
+            ]
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "folderId": {
+            "type": "integer"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "testData": {
+                  "type": "string"
+                },
+                "expectedResult": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "description",
+                "testData",
+                "expectedResult"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "bdd": {
+            "type": "string"
+          },
+          "suggestedDecision": {
+            "enum": [
+              "Approve",
+              "Review",
+              "Reject"
+            ]
+          }
+        },
+        "required": [
+          "gapId",
+          "reasoning"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

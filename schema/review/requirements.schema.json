@@ -1,0 +1,165 @@
+{
+  "type": "object",
+  "properties": {
+    "triageOverrides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "testable": {
+            "type": "boolean"
+          },
+          "reasoning": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "testable",
+          "reasoning"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "dropScenarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "reasoning": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "reasoning"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "addScenarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "storyKey": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "flow": {
+            "enum": [
+              "main",
+              "alt",
+              "exception"
+            ]
+          },
+          "type": {
+            "enum": [
+              "positive",
+              "negative",
+              "boundary",
+              "permission",
+              "validation",
+              "integration"
+            ]
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expected": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "reasoning": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "storyKey",
+          "title",
+          "flow",
+          "type",
+          "steps",
+          "expected",
+          "evidence",
+          "reasoning"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "editScenarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "reasoning": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "positive",
+              "negative",
+              "boundary",
+              "permission",
+              "validation",
+              "integration"
+            ]
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expected": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "reasoning"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "flags": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "issue": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "issue"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

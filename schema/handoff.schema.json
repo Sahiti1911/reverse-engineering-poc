@@ -1,0 +1,37 @@
+{
+  "type": "object",
+  "properties": {
+    "status": {
+      "enum": [
+        "ok",
+        "blocked",
+        "failed"
+      ]
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "forwardNotes": {
+      "type": "string"
+    },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "question": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "status",
+    "findings",
+    "forwardNotes",
+    "outputs"
+  ],
+  "additionalProperties": false
+}

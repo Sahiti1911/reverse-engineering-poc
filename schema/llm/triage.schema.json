@@ -1,0 +1,32 @@
+{
+  "type": "object",
+  "properties": {
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "testable": {
+            "type": "boolean"
+          },
+          "reasoning": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "testable",
+          "reasoning"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "results"
+  ],
+  "additionalProperties": false
+}

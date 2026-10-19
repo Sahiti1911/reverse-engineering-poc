@@ -1,0 +1,67 @@
+{
+  "name": "my-project",
+  "description": "One line: product, Jira project, Zephyr project, repo",
+  "jira": {
+    "baseUrl": "https://your-site.atlassian.net",
+    "projectKey": "PROJ",
+    "storyTypes": [
+      "Story"
+    ],
+    "acSources": [
+      "ac-text",
+      "description"
+    ],
+    "nonTestable": {
+      "summaryPattern": "\\bmeetings?\\b|\\bupgrades?\\b|\\bspike\\b",
+      "flags": "i",
+      "epics": [],
+      "labels": []
+    },
+    "linkTypesToFollow": [],
+    "ucDoc": {
+      "skipTitlePattern": "",
+      "consolidateTitlePattern": ""
+    }
+  },
+  "code": {
+    "provider": "git",
+    "featurePathPattern": "",
+    "featurePathFlags": "m",
+    "repos": [
+      {
+        "name": "my-repo",
+        "cloneUrl": "https://bitbucket.org/your-workspace/my-repo.git",
+        "ref": "main",
+        "browseUrl": "https://bitbucket.org/your-workspace/my-repo/src/{commit}/{path}",
+        "frontendRoot": "frontend/src/app/features",
+        "backendRoots": [
+          "backend/src/main/java"
+        ],
+        "legacyRoots": [],
+        "searchRoots": [],
+        "frontendExtensions": [
+          ".ts",
+          ".html"
+        ],
+        "excludePattern": "\\.spec\\.ts$",
+        "backendLinks": [
+          {
+            "frontendPattern": "\\b(\\w+)ServiceClient\\b",
+            "backendFile": "$1Service.java"
+          }
+        ]
+      }
+    ]
+  },
+  "zephyr": {
+    "projectKey": "QA",
+    "region": "eu",
+    "folderRoot": "Top Folder > Product",
+    "caseUrl": "https://your-site.atlassian.net/projects/QA?selectedItem=com.atlassian.plugins.atlassian-connect-plugin:com.kanoah.test-manager__main-project-page#!/v2/testCase/{key}",
+    "conventions": "conventions.md",
+    "defaults": {
+      "status": "Draft",
+      "automationStatus": "Not Automated"
+    }
+  }
+}

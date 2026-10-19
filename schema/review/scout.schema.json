@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "properties": {
+    "notes": {
+      "type": "string"
+    },
+    "dropStories": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "reasoning": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "reasoning"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,81 @@
+{
+  "name": "avl",
+  "description": "AVL (vehicle tracking / fleet transit) — Jira AVLN, Zephyr QA, Bitbucket ridango/gtms (gtms-vps)",
+  "jira": {
+    "baseUrl": "https://ridango.atlassian.net",
+    "projectKey": "AVLN",
+    "storyTypes": [
+      "Story"
+    ],
+    "acSources": [
+      "uc-doc",
+      "ac-text",
+      "description"
+    ],
+    "nonTestable": {
+      "summaryPattern": "\\bupgrades?\\b|\\bmeetings?\\b|onboarding|\\bhours\\b|release management|\\bdeploy(ment)? to\\b|\\binstall(ation)?\\b|\\bspike\\b",
+      "flags": "i",
+      "epics": [
+        "AVLN-1933",
+        "AVLN-1333",
+        "AVLN-4614",
+        "AVLN-2386",
+        "AVLN-464"
+      ],
+      "labels": []
+    },
+    "linkTypesToFollow": [
+      "Progress reports"
+    ],
+    "ucDoc": {
+      "skipTitlePattern": "Functional parity with legacy|WCAG",
+      "consolidateTitlePattern": "Permission denial"
+    }
+  },
+  "code": {
+    "provider": "git",
+    "featurePathPattern": "generated \\S+ from \\S*?features/([A-Za-z0-9_/-]+?)/?(?=\\s|$)",
+    "featurePathFlags": "m",
+    "repos": [
+      {
+        "name": "gtms",
+        "cloneUrl": "https://bitbucket.org/ridango/gtms.git",
+        "ref": "master",
+        "browseUrl": "https://bitbucket.org/ridango/gtms/src/{commit}/{path}",
+        "frontendRoot": "gtms-vps/frontend/src/app/features",
+        "backendRoots": [
+          "gtms-vps/src/main/java"
+        ],
+        "legacyRoots": [
+          "gtms-vps/src/main/webapp/app/module"
+        ],
+        "searchRoots": [
+          "gtms-vps/frontend/src/app",
+          "gtms-base/src/main/java"
+        ],
+        "frontendExtensions": [
+          ".ts",
+          ".html"
+        ],
+        "excludePattern": "\\.spec\\.ts$",
+        "backendLinks": [
+          {
+            "frontendPattern": "\\b(\\w+)ServiceClient\\b",
+            "backendFile": "$1Service.java"
+          }
+        ]
+      }
+    ]
+  },
+  "zephyr": {
+    "projectKey": "QA",
+    "region": "eu",
+    "folderRoot": "Ridango > AVL",
+    "caseUrl": "https://ridango.atlassian.net/projects/QA?selectedItem=com.atlassian.plugins.atlassian-connect-plugin:com.kanoah.test-manager__main-project-page#!/v2/testCase/{key}",
+    "conventions": "conventions.md",
+    "defaults": {
+      "status": "Draft",
+      "automationStatus": "Not Automated"
+    }
+  }
+}

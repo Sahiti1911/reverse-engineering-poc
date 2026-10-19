@@ -1,0 +1,550 @@
+<p>🧪 QA Test Scenarios — generated 2026-06-30 from gtms-vps/frontend/src/app/features/admin/import-job/</p>
+
+<h1><a name="QATestScenarios%E2%80%94ImportJobs%28DataBundleImports%29"></a>QA Test Scenarios — Import Jobs (Data Bundle Imports)</h1>
+
+<h2><a name="Overview"></a>Overview</h2>
+
+<p>The Import Jobs page lists data-bundle import jobs (schedule/route data uploaded into the system as ZIP bundles). Administrators use it to upload a new bundle, watch import progress, inspect per-module import logs, re-run a previous import, and download the original bundle file. It lives under <b>Admin → Import Job</b> in the navigation.</p>
+
+<ul>
+	<li><b>Route:</b> <tt>admin/importjob</tt> (list); <tt>admin/importjob/:id/logs</tt> (logs detail)</li>
+	<li><b>Component:</b> <tt>ImportJobPageComponent</tt>; <tt>ImportJobLogsPageComponent</tt></li>
+	<li><b>Migrated from:</b> <tt>gtms-vps/src/main/webapp/app/module/admin/import-job/</tt></li>
+	<li><b>Related dialogs:</b> ZIP import dialog (shared); reimport dialog</li>
+	<li><b>Linked pages:</b> Import Job Logs (<tt>admin/importjob/:id/logs</tt>)</li>
+</ul>
+
+
+<h2><a name="Prerequisites"></a>Prerequisites</h2>
+
+<h3><a name="Permissions%2FFunctionalityIDs"></a>Permissions / Functionality IDs</h3>
+
+<div class='table-wrap'>
+<table class='confluenceTable'><tbody>
+<tr>
+<th class='confluenceTh'>Action</th>
+<th class='confluenceTh'>Functionality ID</th>
+<th class='confluenceTh'>Required role / group</th>
+</tr>
+<tr>
+<td class='confluenceTd'>View page</td>
+<td class='confluenceTd'><tt>ADMIN.BUNDLE_IMPORTS.VIEW</tt></td>
+<td class='confluenceTd'>Admin role granting bundle-imports view</td>
+</tr>
+<tr>
+<td class='confluenceTd'>Upload (Add)</td>
+<td class='confluenceTd'><tt>ADMIN.BUNDLE_IMPORTS.ADD</tt></td>
+<td class='confluenceTd'>Admin role granting bundle-imports add</td>
+</tr>
+<tr>
+<td class='confluenceTd'>Download bundle</td>
+<td class='confluenceTd'><tt>ADMIN.BUNDLE_IMPORTS.DOWNLOAD</tt></td>
+<td class='confluenceTd'>Admin role granting bundle-imports download</td>
+</tr>
+<tr>
+<td class='confluenceTd'>Reimport bundle</td>
+<td class='confluenceTd'><tt>ADMIN.BUNDLE_IMPORTS.REIMPORT</tt></td>
+<td class='confluenceTd'>Admin role granting bundle-imports reimport</td>
+</tr>
+</tbody></table>
+</div>
+
+
+<p>Viewing logs and exporting logs require only the page View permission (no dedicated functionality ID).</p>
+
+<h3><a name="PrepopulatedData"></a>Prepopulated Data</h3>
+
+<div class='table-wrap'>
+<table class='confluenceTable'><tbody>
+<tr>
+<th class='confluenceTh'>Entity</th>
+<th class='confluenceTh'>Why needed</th>
+<th class='confluenceTh'>How to seed</th>
+</tr>
+<tr>
+<td class='confluenceTd'>At least one completed import job</td>
+<td class='confluenceTd'>Unlocks View-logs, Download, Reimport row actions</td>
+<td class='confluenceTd'>Upload a data bundle via the Add flow, or use an environment with import history</td>
+</tr>
+<tr>
+<td class='confluenceTd'>A valid data-bundle ZIP file</td>
+<td class='confluenceTd'>Required for Upload and to produce a job with files available</td>
+<td class='confluenceTd'>Obtain a real schedule/route bundle ZIP from the data team</td>
+</tr>
+<tr>
+<td class='confluenceTd'>An import job with files available</td>
+<td class='confluenceTd'>Download and Reimport actions are hidden when files are not retained</td>
+<td class='confluenceTd'>Recent imports retain files; old/purged jobs may not</td>
+</tr>
+<tr>
+<td class='confluenceTd'>An import job that produced WARNING / ERROR logs</td>
+<td class='confluenceTd'>Verifies coloured log rows and log-type filtering</td>
+<td class='confluenceTd'>Import a bundle with known data issues</td>
+</tr>
+</tbody></table>
+</div>
+
+
+<h3><a name="SystemConfiguration"></a>System Configuration</h3>
+
+<p>None specific to this page.</p>
+
+<h3><a name="DependentModules"></a>Dependent Modules</h3>
+
+<p>Self-contained; no prior module setup required beyond a bundle file.</p>
+
+<hr />
+
+<h2><a name="Grid%26FilterCapabilities"></a>Grid &amp; Filter Capabilities</h2>
+
+<p>Common UI mechanics (sorting, pagination, auto-refresh, generic filter behaviour) are provided by the shared grid/filter framework and are not re-tested here. QA verifies that the <b>right columns are present and that each is sortable / filterable as specified</b>.</p>
+
+<h3><a name="ImportJobslist%28%7B%7Badmin%2Fimportjob%7D%7D%29"></a>Import Jobs list (<tt>admin/importjob</tt>)</h3>
+
+<div class='table-wrap'>
+<table class='confluenceTable'><tbody>
+<tr>
+<th class='confluenceTh'>Column</th>
+<th class='confluenceTh'>Sortable</th>
+<th class='confluenceTh'>Filterable</th>
+<th class='confluenceTh'>Filter type</th>
+</tr>
+<tr>
+<td class='confluenceTd'>Created date</td>
+<td class='confluenceTd'>Yes (default, descending)</td>
+<td class='confluenceTd'>Yes</td>
+<td class='confluenceTd'>Date</td>
+</tr>
+<tr>
+<td class='confluenceTd'>Name</td>
+<td class='confluenceTd'>No</td>
+<td class='confluenceTd'>Yes</td>
+<td class='confluenceTd'>String (suggestions from existing bundle names)</td>
+</tr>
+<tr>
+<td class='confluenceTd'>Scheduled date</td>
+<td class='confluenceTd'>No</td>
+<td class='confluenceTd'>No</td>
+<td class='confluenceTd'>—</td>
+</tr>
+<tr>
+<td class='confluenceTd'>Finished date</td>
+<td class='confluenceTd'>No</td>
+<td class='confluenceTd'>No</td>
+<td class='confluenceTd'>—</td>
+</tr>
+<tr>
+<td class='confluenceTd'>Progress</td>
+<td class='confluenceTd'>No</td>
+<td class='confluenceTd'>No</td>
+<td class='confluenceTd'>—</td>
+</tr>
+<tr>
+<td class='confluenceTd'>Status</td>
+<td class='confluenceTd'>No</td>
+<td class='confluenceTd'>No</td>
+<td class='confluenceTd'>— (value translated)</td>
+</tr>
+<tr>
+<td class='confluenceTd'>Module processed</td>
+<td class='confluenceTd'>No</td>
+<td class='confluenceTd'>No</td>
+<td class='confluenceTd'>— (value translated)</td>
+</tr>
+<tr>
+<td class='confluenceTd'>User</td>
+<td class='confluenceTd'>No</td>
+<td class='confluenceTd'>No</td>
+<td class='confluenceTd'>—</td>
+</tr>
+</tbody></table>
+</div>
+
+
+<ul>
+	<li>Default sort: Created date, descending</li>
+	<li>Auto-refresh: 30 seconds (on by default)</li>
+	<li>Row selection: enabled</li>
+</ul>
+
+
+<h3><a name="ImportJobLogs%28%7B%7Badmin%2Fimportjob%2F%3Aid%2Flogs%7D%7D%29"></a>Import Job Logs (<tt>admin/importjob/:id/logs</tt>)</h3>
+
+<div class='table-wrap'>
+<table class='confluenceTable'><tbody>
+<tr>
+<th class='confluenceTh'>Column</th>
+<th class='confluenceTh'>Sortable</th>
+<th class='confluenceTh'>Filterable</th>
+<th class='confluenceTh'>Filter type</th>
+</tr>
+<tr>
+<td class='confluenceTd'>Created date</td>
+<td class='confluenceTd'>Yes (default, descending)</td>
+<td class='confluenceTd'>Yes</td>
+<td class='confluenceTd'>Date</td>
+</tr>
+<tr>
+<td class='confluenceTd'>Module processing</td>
+<td class='confluenceTd'>No</td>
+<td class='confluenceTd'>Yes</td>
+<td class='confluenceTd'>Enum (job modules)</td>
+</tr>
+<tr>
+<td class='confluenceTd'>Type</td>
+<td class='confluenceTd'>No</td>
+<td class='confluenceTd'>Yes</td>
+<td class='confluenceTd'>Enum (log type)</td>
+</tr>
+<tr>
+<td class='confluenceTd'>Text</td>
+<td class='confluenceTd'>No</td>
+<td class='confluenceTd'>No</td>
+<td class='confluenceTd'>—</td>
+</tr>
+</tbody></table>
+</div>
+
+
+<ul>
+	<li>Default sort: Created date, descending</li>
+	<li>Row styling: WARNING rows render brown, ERROR rows render red</li>
+	<li>Row selection: enabled (no row actions)</li>
+</ul>
+
+
+<hr />
+
+<h2><a name="UseCases"></a>Use Cases</h2>
+
+<h3><a name="UC01%E2%80%94Uploadanewdatabundle"></a>UC-01 — Upload a new data bundle</h3>
+
+<p><b>Actor:</b> User with <tt>ADMIN.BUNDLE_IMPORTS.ADD</tt>.</p>
+
+<p><b>Preconditions:</b></p>
+
+<ul>
+	<li>A valid data-bundle ZIP file is available locally.</li>
+	<li>User is on the Import Jobs list.</li>
+</ul>
+
+
+<p><b>Trigger:</b> User clicks the <b>Add</b> toolbar button.</p>
+
+<p><b>Main success scenario:</b></p>
+
+<ol>
+	<li>User clicks <b>Add</b>.</li>
+	<li>The ZIP import dialog opens with title <b>Import</b>.</li>
+	<li>User selects a bundle ZIP file.</li>
+	<li>Upload starts; progress is shown.</li>
+	<li>On completion the dialog closes automatically and the grid refreshes, showing the new import job.</li>
+</ol>
+
+
+<p><b>Alternative flows:</b></p>
+
+<ul>
+	<li><b>3a — Cancel:</b> user closes the dialog before uploading → dialog closes, no job created, grid unchanged.</li>
+	<li><b>4a — Long import:</b> the job appears with in-progress status and progress &lt; 100%; the 30-second auto-refresh updates status/progress over time.</li>
+</ul>
+
+
+<p><b>Exception flows:</b></p>
+
+<ul>
+	<li><b>4b — Upload rejected:</b> the backend rejects the uploaded file → an error toast is shown; no new job appears.</li>
+</ul>
+
+
+<p><b>Postconditions:</b></p>
+
+<ul>
+	<li>A new import job exists and is visible in the grid; the import runs server-side.</li>
+</ul>
+
+
+<hr />
+
+<h3><a name="UC02%E2%80%94Viewimportjoblogs"></a>UC-02 — View import job logs</h3>
+
+<p><b>Actor:</b> User with <tt>ADMIN.BUNDLE_IMPORTS.VIEW</tt>.</p>
+
+<p><b>Preconditions:</b></p>
+
+<ul>
+	<li>At least one import job exists.</li>
+</ul>
+
+
+<p><b>Trigger:</b> User opens the row action menu and clicks <b>View</b>.</p>
+
+<p><b>Main success scenario:</b></p>
+
+<ol>
+	<li>User clicks <b>View</b> on a job row.</li>
+	<li>The Import Job Logs page opens at <tt>admin/importjob/:id/logs</tt>.</li>
+	<li>The logs grid lists per-module log entries with Created date, Module processing, Type, and Text columns.</li>
+	<li>WARNING entries are shown in brown, ERROR entries in red.</li>
+	<li>User clicks the back navigation to return to the list.</li>
+</ol>
+
+
+<p><b>Alternative flows:</b></p>
+
+<ul>
+	<li><b>3a — Filter by module:</b> user applies the Module processing filter → grid shows only entries for that module.</li>
+	<li><b>3b — Filter by log type:</b> user applies the Type filter → grid shows only entries of the chosen log type.</li>
+</ul>
+
+
+<p><b>Postconditions:</b></p>
+
+<ul>
+	<li>No data change; user has reviewed the import log.</li>
+</ul>
+
+
+<hr />
+
+<h3><a name="UC03%E2%80%94Downloadtheoriginalbundlefile"></a>UC-03 — Download the original bundle file</h3>
+
+<p><b>Actor:</b> User with <tt>ADMIN.BUNDLE_IMPORTS.DOWNLOAD</tt>.</p>
+
+<p><b>Preconditions:</b></p>
+
+<ul>
+	<li>A job row where the bundle files are still retained (Download action visible).</li>
+</ul>
+
+
+<p><b>Trigger:</b> User opens the row action menu and clicks <b>Download</b>.</p>
+
+<p><b>Main success scenario:</b></p>
+
+<ol>
+	<li>User clicks <b>Download</b> on a job row whose files are available.</li>
+	<li>The browser downloads a ZIP named after the bundle (<tt>&lt;bundle name&gt;.zip</tt>).</li>
+</ol>
+
+
+<p><b>Alternative flows:</b></p>
+
+<ul>
+	<li><b>1a — Files not available:</b> for a job whose files were purged, the Download action is not shown.</li>
+</ul>
+
+
+<p><b>Postconditions:</b></p>
+
+<ul>
+	<li>Bundle ZIP saved locally; no server state change.</li>
+</ul>
+
+
+<hr />
+
+<h3><a name="UC04%E2%80%94Reimportapreviousdatabundle"></a>UC-04 — Reimport a previous data bundle</h3>
+
+<p><b>Actor:</b> User with <tt>ADMIN.BUNDLE_IMPORTS.REIMPORT</tt>.</p>
+
+<p><b>Preconditions:</b></p>
+
+<ul>
+	<li>A job row where bundle files are retained (Reimport action visible).</li>
+</ul>
+
+
+<p><b>Trigger:</b> User opens the row action menu and clicks <b>Reimport</b>.</p>
+
+<p><b>Main success scenario:</b></p>
+
+<ol>
+	<li>User clicks <b>Reimport</b>.</li>
+	<li>The reimport dialog opens, pre-filled with the bundle <b>Name</b>; <b>Perform autodeploy</b> is enabled by default; <b>Force new route version</b> and <b>Route cleanup type</b> fields are shown.</li>
+	<li>User adjusts options as needed and clicks <b>Reimport</b>.</li>
+	<li>A success toast <b>Reimport started</b> is shown; the dialog closes and the grid refreshes.</li>
+</ol>
+
+
+<p><b>Alternative flows:</b></p>
+
+<ul>
+	<li><b>2a — Autodeploy off:</b> user unchecks <b>Perform autodeploy</b> → the <b>Force new route version</b> and <b>Route cleanup type</b> fields are hidden; reimport runs without autodeploy.</li>
+	<li><b>2b — Route cleanup chosen:</b> with autodeploy on, user selects <b>Cleanup unused</b> or <b>Cleanup all</b> in Route cleanup type → that cleanup is applied on deploy. Default is <b>None</b>.</li>
+	<li><b>3a — Cancel:</b> user closes the dialog → no reimport, grid unchanged.</li>
+</ul>
+
+
+<p><b>Exception flows:</b></p>
+
+<ul>
+	<li><b>3b — Empty name:</b> the <b>Name</b> field is cleared → the <b>Reimport</b> button is disabled until a non-empty name is entered.</li>
+</ul>
+
+
+<p><b>Postconditions:</b></p>
+
+<ul>
+	<li>A new reimport job runs server-side and appears in the grid.</li>
+</ul>
+
+
+<p><b>Notes:</b> Legacy opened the reimport modal with the same fields. The Angular dialog disables Save on empty name (legacy had no such guard) — an allowed validation improvement.</p>
+
+<hr />
+
+<h3><a name="UC05%E2%80%94Exportimportjoblogs"></a>UC-05 — Export import job logs</h3>
+
+<p><b>Actor:</b> User with <tt>ADMIN.BUNDLE_IMPORTS.VIEW</tt>.</p>
+
+<p><b>Preconditions:</b></p>
+
+<ul>
+	<li>On the Import Job Logs page for a job that has log entries.</li>
+</ul>
+
+
+<p><b>Trigger:</b> User clicks the <b>Export</b> toolbar button on the logs page.</p>
+
+<p><b>Main success scenario:</b></p>
+
+<ol>
+	<li>User (optionally) applies log filters.</li>
+	<li>User clicks <b>Export</b>.</li>
+	<li>An export job is generated for the current filter, scoped to this import job.</li>
+</ol>
+
+
+<p><b>Exception flows:</b></p>
+
+<ul>
+	<li><b>2a — No filter applied:</b> if no filter is active, a warning toast (<b>Export error / Filter not applied</b>) is shown and no export is generated.</li>
+</ul>
+
+
+<p><b>Postconditions:</b></p>
+
+<ul>
+	<li>An export job is queued; no change to import data.</li>
+</ul>
+
+
+<hr />
+
+<h3><a name="UC06%E2%80%94Functionalparitywithlegacypage%28mandatory%2Cmigrated%29"></a>UC-06 — Functional parity with legacy page <em>(mandatory, migrated)</em></h3>
+
+<p><b>Actor:</b> Any role with View permission.</p>
+
+<p><b>Preconditions:</b></p>
+
+<ul>
+	<li>Legacy page available for side-by-side comparison: <tt>gtms-vps/src/main/webapp/app/module/admin/import-job/</tt>.</li>
+	<li>Same data visible on both pages.</li>
+</ul>
+
+
+<p><b>Trigger:</b> QA opens the migrated page and the legacy page side by side.</p>
+
+<p><b>Main success scenario:</b></p>
+
+<ol>
+	<li>Enumerate every legacy affordance — list columns (Created date, Name, Scheduled date, Finished date, Progress, Status, Module processed, User), Add toolbar action, row actions (View, Download, Reimport), 30s auto-refresh, logs grid columns + filters, log export, reimport modal fields.</li>
+	<li>Confirm each is present on the migrated page and performs the same action.</li>
+	<li>Exercise each action on the migrated page; confirm the observable outcome matches legacy.</li>
+	<li>Confirm no legacy functionality is missing.</li>
+</ol>
+
+
+<p><b>Alternative flows:</b></p>
+
+<ul>
+	<li><b>2a — UI improved:</b> legacy opened logs in an inline splitter panel; the migrated app navigates to a dedicated logs page. Functionality intact → <b>pass</b>.</li>
+</ul>
+
+
+<p><b>Exception flows:</b></p>
+
+<ul>
+	<li><b>2b — Missing functionality:</b> a legacy action/column/field is absent or non-functional on the migrated page → <b>fail</b>; log the gap.</li>
+</ul>
+
+
+<p><b>Postconditions:</b></p>
+
+<ul>
+	<li>Migrated page confirmed functionally equivalent to legacy (improvements allowed, nothing dropped).</li>
+</ul>
+
+
+<hr />
+
+<h3><a name="UC07%E2%80%94WCAG2.1AAcompliance%28mandatory%29"></a>UC-07 — WCAG 2.1 AA compliance <em>(mandatory)</em></h3>
+
+<p><b>Actor:</b> Any role with View permission.</p>
+
+<p><b>Preconditions:</b></p>
+
+<ul>
+	<li>An accessibility checker available (e.g. axe DevTools, Lighthouse).</li>
+</ul>
+
+
+<p><b>Trigger:</b> QA audits the page for accessibility.</p>
+
+<p><b>Main success scenario:</b></p>
+
+<ol>
+	<li>Navigate the list page, logs page, and both dialogs using <b>keyboard only</b> — every interactive element is reachable via <tt>Tab</tt> and actionable via <tt>Enter</tt>/<tt>Space</tt>.</li>
+	<li>Confirm a visible focus indicator on every focused element.</li>
+	<li>Confirm icon-only buttons (Add, row actions, Export) expose an accessible label; all reimport-dialog inputs have associated labels.</li>
+	<li>Confirm text contrast ≥ 4.5:1, UI/large-text ≥ 3:1; the WARNING/ERROR log colouring is paired with the <b>Type</b> column text (state not conveyed by colour alone).</li>
+	<li>Confirm dynamic status/error toasts are announced.</li>
+	<li>Run the automated a11y checker → <b>zero AA violations</b>.</li>
+</ol>
+
+
+<p><b>Exception flows:</b></p>
+
+<ul>
+	<li><b>6a — Violation found:</b> the checker or keyboard walkthrough surfaces an AA failure → <b>fail</b>; log the specific criterion.</li>
+</ul>
+
+
+<p><b>Postconditions:</b></p>
+
+<ul>
+	<li>Page passes WCAG 2.1 AA.</li>
+</ul>
+
+
+<hr />
+
+<h3><a name="UC08%E2%80%94Permissiondenial%28consolidated%29"></a>UC-08 — Permission denial <em>(consolidated)</em></h3>
+
+<p><b>Actor:</b> User lacking one or more bundle-imports functionality IDs.</p>
+
+<p><b>Preconditions:</b></p>
+
+<ul>
+	<li>Test users configured with each permission individually removed.</li>
+</ul>
+
+
+<p><b>Trigger:</b> User navigates to the Import Jobs page with reduced permissions.</p>
+
+<p><b>Main success scenario:</b></p>
+
+<ol>
+	<li>Without <tt>ADMIN.BUNDLE_IMPORTS.VIEW</tt> — the page is not accessible from navigation / route is blocked.</li>
+	<li>With View but without <tt>ADMIN.BUNDLE_IMPORTS.ADD</tt> — the <b>Add</b> toolbar button is not shown.</li>
+	<li>With View but without <tt>ADMIN.BUNDLE_IMPORTS.DOWNLOAD</tt> — the <b>Download</b> row action is not shown.</li>
+	<li>With View but without <tt>ADMIN.BUNDLE_IMPORTS.REIMPORT</tt> — the <b>Reimport</b> row action is not shown.</li>
+</ol>
+
+
+<p><b>Postconditions:</b></p>
+
+<ul>
+	<li>UI affordances reflect the user's permissions; no restricted action is reachable.</li>
+</ul>

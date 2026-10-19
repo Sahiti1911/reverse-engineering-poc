@@ -1,0 +1,110 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Coverage analysis project profile",
+  "description": "Everything project-specific lives here. A new project = a new profiles/<name>/profile.json + conventions.md; no code changes.",
+  "type": "object",
+  "required": ["name", "jira", "zephyr"],
+  "properties": {
+    "name": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "description": { "type": "string" },
+    "jira": {
+      "type": "object",
+      "required": ["baseUrl", "projectKey", "storyTypes"],
+      "properties": {
+        "baseUrl": { "type": "string", "pattern": "^https://" },
+        "projectKey": { "type": "string" },
+        "storyTypes": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "acSources": {
+          "type": "array",
+          "items": { "enum": ["uc-doc", "ac-text", "description"] },
+          "description": "Which story parsers to use, in priority order. uc-doc = structured UC-NN QA scenario docs (parsed by script, 0 tokens)."
+        },
+        "nonTestable": {
+          "type": "object",
+          "description": "Rule-based triage (0 tokens). Anything not matched here or recognised as testable goes to the LLM triage stage.",
+          "properties": {
+            "summaryPattern": { "type": "string" },
+            "flags": { "type": "string" },
+            "epics": { "type": "array", "items": { "type": "string" } },
+            "labels": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "linkTypesToFollow": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Issue link types whose other end also counts for coverage (e.g. a TESTING story <-> its dev story)."
+        },
+        "ucDoc": {
+          "type": "object",
+          "properties": {
+            "skipTitlePattern": { "type": "string", "description": "UCs to leave out of atomic test cases (e.g. legacy parity, WCAG audits)." },
+            "consolidateTitlePattern": { "type": "string", "description": "UCs that become ONE test case with one step per bullet (e.g. permission denial)." }
+          }
+        }
+      }
+    },
+    "code": {
+      "type": "object",
+      "properties": {
+        "provider": { "enum": ["git", "none"] },
+        "featurePathPattern": { "type": "string", "description": "Regex on the story text; capture group 1 = module path under frontendRoot." },
+        "featurePathFlags": { "type": "string" },
+        "repos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "cloneUrl", "ref", "frontendRoot"],
+            "properties": {
+              "name": { "type": "string" },
+              "cloneUrl": { "type": "string" },
+              "ref": { "type": "string" },
+              "browseUrl": { "type": "string", "description": "Template with {commit} and {path}" },
+              "frontendRoot": { "type": "string" },
+              "backendRoots": { "type": "array", "items": { "type": "string" } },
+              "legacyRoots": { "type": "array", "items": { "type": "string" } },
+              "searchRoots": { "type": "array", "items": { "type": "string" }, "description": "Extra code the implementation discovery may follow references into (shared frontend services, other backend modules). Cloned too." },
+              "frontendExtensions": { "type": "array", "items": { "type": "string" } },
+              "excludePattern": { "type": "string" },
+              "backendLinks": {
+                "type": "array",
+                "description": "How a frontend file points at backend code: regex over frontend source, backendFile template using $1.",
+                "items": {
+                  "type": "object",
+                  "required": ["frontendPattern", "backendFile"],
+                  "properties": { "frontendPattern": { "type": "string" }, "backendFile": { "type": "string" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "zephyr": {
+      "type": "object",
+      "required": ["projectKey", "region", "folderRoot"],
+      "properties": {
+        "projectKey": { "type": "string" },
+        "region": { "enum": ["eu", "us"] },
+        "folderRoot": { "type": "string", "description": "Only cases under this folder path are in scope, e.g. 'Ridango > AVL'." },
+        "caseUrl": { "type": "string", "description": "Template with {key}" },
+        "conventions": { "type": "string" },
+        "defaults": {
+          "type": "object",
+          "properties": { "status": { "type": "string" }, "automationStatus": { "type": "string" } }
+        }
+      }
+    },
+    "modules": {
+      "type": "object",
+      "description": "Optional per-module hints. Key = module path (as captured by featurePathPattern).",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "summaryPattern": { "type": "string", "description": "Assigns stories without a feature path to this module." },
+          "zephyrFolder": { "type": "string", "description": "Folder path substring for new cases of this module." },
+          "jql": { "type": "string", "description": "Optional JQL used for --scope module:<name>." }
+        }
+      }
+    }
+  }
+}

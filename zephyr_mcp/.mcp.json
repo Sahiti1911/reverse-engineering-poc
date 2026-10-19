@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "zephyr": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "src/server.mjs"
+      ],
+      "env": {}
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "type": "object",
+  "properties": {
+    "overrides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "expectedId": {
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "Covered",
+              "Partial",
+              "Missing"
+            ]
+          },
+          "matchedKeys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confidence": {
+            "enum": [
+              "High",
+              "Medium",
+              "Low"
+            ]
+          },
+          "reasoning": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "expectedId",
+          "verdict",
+          "reasoning"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

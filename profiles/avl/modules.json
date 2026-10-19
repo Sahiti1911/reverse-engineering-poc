@@ -1,0 +1,23 @@
+{
+  "$schema": "../../schema/modules.schema.json",
+  "modules": {
+    "import job": {
+      "path": "admin/import-job",
+      "aliases": ["bundle import", "data bundle", "import jobs", "importjob"],
+      "keywords": ["import job", "importjob", "tms.admin.importjob", "bundle import", "reimport"],
+      "zephyrFolder": "Bundle Import",
+      "includeStories": ["AVLN-2398"],
+      "excludeStories": [],
+      "notes": "AVLN-2398 is the QA story with the UC doc (calibration); AVLN-2363 is its dev story."
+    },
+    "conductor": {
+      "path": "admin/conductor",
+      "aliases": ["conductors", "conductor page"],
+      "keywords": ["conductor page", "tms.admin.conductor", "conductor dialog", "conductors"],
+      "zephyrFolder": "Conductors",
+      "includeStories": ["AVLN-2390", "AVLN-2316"],
+      "excludeStories": ["AVLN-282", "AVLN-284", "AVLN-458", "AVLN-1030", "AVLN-1165", "AVLN-1186", "AVLN-1199", "AVLN-1202", "AVLN-1215", "AVLN-1266", "AVLN-1528", "AVLN-1849", "AVLN-4276"],
+      "notes": "\"Conductor\" is also the name of an EU customer project; stories about its environments are not about this page."
+    }
+  }
+}

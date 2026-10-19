@@ -1,0 +1,75 @@
+{
+  "type": "object",
+  "properties": {
+    "matches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "expectedId": {
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "Covered",
+              "Partial",
+              "Missing"
+            ]
+          },
+          "matchedKeys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confidence": {
+            "enum": [
+              "High",
+              "Medium",
+              "Low"
+            ]
+          },
+          "missingAspects": {
+            "type": "string"
+          },
+          "reasoning": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "expectedId",
+          "verdict",
+          "matchedKeys",
+          "confidence",
+          "missingAspects",
+          "reasoning"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "orphans": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "reasoning": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "reasoning"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "matches",
+    "orphans"
+  ],
+  "additionalProperties": false
+}

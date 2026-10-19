@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "properties": {
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "decision": {
+            "enum": [
+              "keep",
+              "drop",
+              "needs-confirmation"
+            ]
+          },
+          "reasoning": {
+            "type": "string"
+          },
+          "suspectedBug": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "decision",
+          "reasoning"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

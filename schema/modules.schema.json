@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Module catalogue of a profile (profiles/<name>/modules.json)",
+  "description": "Optional. Names you use for modules, mapped to their code path and to the words that find their Jira stories. When a module is listed here, the scout uses these settings instead of guessing.",
+  "type": "object",
+  "required": ["modules"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "modules": {
+      "type": "object",
+      "description": "Key = the name you type, e.g. \"import job\" (case-insensitive).",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["path"],
+        "additionalProperties": false,
+        "properties": {
+          "path": { "type": "string", "description": "Code module path under the frontend root, e.g. admin/import-job (see: node scripts/modules.mjs)." },
+          "aliases": { "type": "array", "items": { "type": "string" }, "description": "Other names that should pick this module, e.g. \"bundle import\"." },
+          "keywords": { "type": "array", "items": { "type": "string" }, "description": "Words that Jira stories about this module contain. Used for the Jira search and to assign stories to the module. Avoid words that also name customers/projects." },
+          "zephyrFolder": { "type": "string", "description": "Folder path (or part of it) where new test cases for this module belong, e.g. \"Bundle Import\"." },
+          "includeStories": { "type": "array", "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*-\\d+$" }, "description": "Stories that always belong to the module, even without a keyword hit." },
+          "excludeStories": { "type": "array", "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*-\\d+$" }, "description": "Stories never analysed for this module (noise)." },
+          "jql": { "type": "string", "description": "Optional full JQL that replaces the keyword search." },
+          "notes": { "type": "string", "description": "Anything the agents should know about this module." }
+        }
+      }
+    }
+  }
+}
