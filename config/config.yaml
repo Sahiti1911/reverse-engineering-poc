@@ -18,10 +18,10 @@ environments:
       # none:          the app needs no login.
       method: storage-state
       storageState: cache/avl/ui/test.storage.json
-      # Where ui-login reads the username and password (a .env file kept outside this repo; never copied).
+      # Where ui-login reads the username and password (git-ignored .env; never printed or passed to agents).
       # Without it, ui-login opens a browser and you log in by hand.
       credentials:
-        envFile: ../Ridango-poc/Playwright-automation-poc/.env
+        envFile: .env
         userVar: TEST_USERNAME
         passwordVar: TEST_PASSWORD
       # The login form, by accessible name (as in the Playwright project's LoginPage).

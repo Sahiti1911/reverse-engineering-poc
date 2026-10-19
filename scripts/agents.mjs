@@ -184,6 +184,10 @@ Pipeline (config/config.yaml): ${phases.map((p) => p.agents.map((x) => x.name).j
     process.exit(a.help ? 0 : 2);
   }
   loadEnv();
+  // UI login secrets are only for npm run ui-login; agent processes inherit this environment, so drop them.
+  for (const e of Object.values(cfg.environments ?? {})) {
+    for (const v of [e.login?.credentials?.userVar, e.login?.credentials?.passwordVar]) if (v) delete process.env[v];
+  }
   const profile = loadProfile(a.profile); // defaults to config.yaml defaultProfile
   const configured = resolveModule(profile, a.module);
   const names = configuredAgents.map((x) => x.name);
