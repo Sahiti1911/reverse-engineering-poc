@@ -596,7 +596,7 @@ async function designSuite(ctx, moduleContext, rows) {
       if (inherited) ctx.step("check", { batch: r.story.key, in: own.length, out: 0, notes: `All ${inherited} designed case(s) keep their scenarios' verdict (0 tokens).` });
       return;
     }
-    const missing =(reasoning, confidence = "Low", decidedBy = "fallback") => ({ verdict: "Missing", matchedKeys: [], confidence, missingAspects: "", decidedBy, reasoning });
+    const missing = (reasoning, confidence = "Low", decidedBy = "fallback") => ({ verdict: "Missing", matchedKeys: [], confidence, missingAspects: "", decidedBy, reasoning });
     const pool = checkCandidates(r, mine, rows);
     if (!pool.length) {
       for (const tc of mine) tc.check = missing(`No existing Zephyr case was found for ${r.story.key} (no linked, folder or keyword candidates), so nothing can cover it.`, "High", "rule");

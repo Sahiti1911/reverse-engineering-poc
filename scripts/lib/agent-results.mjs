@@ -1,7 +1,7 @@
 // Every agent's result in one place: handoff (status, findings, forwarded notes, tokens), its review file and
 // what a later stage applied from it, plus the UI explorer's evidence (inventory, screenshots, blocked requests).
-// Written to agents.json / coverage.json (see run-outputs.mjs) and to the 5_UI_Exploration, 10_Agents and
-// 11_Agent_Reviews sheets.
+// Written to agents.json / coverage.json (see run-outputs.mjs) and to the 5_UI_Exploration, 11_Agents and
+// 12_Agent_Reviews sheets.
 import fs from "node:fs";
 import path from "node:path";
 import { readJson } from "./util.mjs";

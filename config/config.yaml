@@ -118,6 +118,7 @@ limits:
   moduleCandidates: 15
   folderCandidates: 15
   designContextChars: 40000   # module context sent to the design call
+  moduleContextChars: 20000   # module context sent with every draft batch
 
 matching:
   autoAcceptConfidence: [High]

@@ -96,7 +96,7 @@ export function buildPrompt({ agent, rel, profile, moduleWords, keywords, limit,
   } else if (agent.stage !== "report") {
     L.push(`  (The ${agent.stage} stage has ALREADY been run for you — do not run it; review its results.)`);
   }
-  L.push(`  node scripts/inspect.mjs --run-dir ${rel} --what <stories|story|scenarios|code|ui|inventory|context|candidates|matches|gaps|validation|handoffs> [--key KEY] [--filter text]`);
+  L.push(`  node scripts/inspect.mjs --run-dir ${rel} --what <stories|story|scenarios|code|ui|inventory|context|candidates|matches|design|gaps|validation|handoffs> [--key KEY] [--filter text]`);
   L.push("");
   if (previous.length) {
     L.push("Findings forwarded by the earlier agents:");

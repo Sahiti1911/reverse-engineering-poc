@@ -6,12 +6,8 @@ import path from "node:path";
 import dotenv from "dotenv";
 import { ROOT } from "./config.mjs";
 
-async function playwright() {
-  return import("playwright-core");
-}
-
 async function launch(env, headless) {
-  const pw = await playwright();
+  const pw = await import("playwright-core");
   const b = env.browser ?? "chromium";
   if (b === "firefox") return pw.firefox.launch({ headless });
   if (b === "webkit") return pw.webkit.launch({ headless });
@@ -32,10 +28,10 @@ function credentials(login) {
 }
 
 const formOf = (login) => ({ username: "Username", password: "Password", submit: "Log in", ...login.form });
-export const storageFile = (env) => path.resolve(ROOT, env.login.storageState);
+const storageFile = (env) => path.resolve(ROOT, env.login.storageState);
 
 /** Opens the app with the saved session. Returns null when it is logged in, else the reason it is not. */
-export async function sessionProblem(env, { browser = null } = {}) {
+async function sessionProblem(env, { browser = null } = {}) {
   const file = storageFile(env);
   if (!fs.existsSync(file)) return "no saved session";
   const own = !browser;

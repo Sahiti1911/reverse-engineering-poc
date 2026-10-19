@@ -114,7 +114,7 @@ export function agentRows(agents = []) {
   }));
 }
 
-/** 11_Agent_Reviews rows: every review item, except sections shown in their own sheet (one pointer row each). */
+/** 12_Agent_Reviews rows: every review item, except sections shown in their own sheet (one pointer row each). */
 export function agentReviewRows(agents = []) {
   return agents.flatMap((a) => {
     if (!a.review) return [];
@@ -160,7 +160,7 @@ function checkReasoning(sheet, rows, key, idKey) {
   return rows.filter((r) => !String(r[key] ?? "").trim()).map((r) => `${sheet}: ${r[idKey]} has no ${key}`);
 }
 
-/** Read the 8_Gaps sheet back as objects keyed by header text (used by re-runs and create-approved). Older workbooks call it 6_Gaps. */
+/** Read the 9_Gaps sheet back as objects keyed by header text (used by re-runs and create-approved). Older workbooks call it 8_Gaps or 6_Gaps. */
 export async function readGapSheet(file) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(file);
