@@ -35,7 +35,7 @@ environments:
 # ---------------------------------------------------------------- scope
 scope:
   # Jira status categories to analyse. [] = all stories. Typical: [Done].
-  statusCategories: [Done]
+  statusCategories: []
   # Baseline: none = analyse every story in scope;
   #           last-run = only stories updated since the previous finished run of the same scope.
   baseline: none
@@ -72,7 +72,13 @@ agents:
     # full:      no write block — only on an environment with allowWrites: true
     mode: read-only
     # Requests the read-only block lets through (regex on the URL), e.g. grid searches sent as POST.
-    allowedWriteUrls: []
+    # AVL loads the logged-in user (tms-webapp/init), filter options (filter-provider) and grid rows
+    # (<module>/filter, e.g. user/filter, performance/filter-assets) with POST; blocking them leaves the app on
+    # "Loading" or the grids empty. Export jobs (exportjob/export/<n>) create data and stay blocked.
+    allowedWriteUrls:
+      - "/rest/tms-webapp/init$"
+      - "/rest/filter-provider$"
+      - "/rest/[a-z-]+(/[a-z-]+)*/filter(-[a-z-]+)?$"
     maxPages: 8
     headless: true
     playwrightMcp: "@playwright/mcp@0.0.83"
@@ -92,6 +98,8 @@ models:
   extract-ac: claude-sonnet-5-5
   extract-code: claude-sonnet-5-5
   match: claude-opus-5-5
+  design: claude-opus-5-5     # the module's full test suite, from the context-builder's module context
+  check: claude-opus-5-5      # each designed case vs the existing Zephyr cases
   draft: claude-sonnet-5-5
 
 concurrency: 3
@@ -109,6 +117,7 @@ limits:
   keywordCandidates: 12
   moduleCandidates: 15
   folderCandidates: 15
+  designContextChars: 40000   # module context sent to the design call
 
 matching:
   autoAcceptConfidence: [High]

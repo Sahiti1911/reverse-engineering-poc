@@ -50,5 +50,6 @@ Skip steps 0–1 when resuming with `--from`.
    suspected bugs and the "Tokens used" table. Say how many Rovo candidates there were and how many the
    scout kept (from its findings), and list the Rovo Confluence docs (title + link) as further reading.
    Give the workbook path.
-5. Do not create anything in Zephyr and do not change Jira. Point the user to the 6_Gaps review and the
+5. Do not create anything in Zephyr and do not change Jira. Point the user to the 8_Test_Design sheet (the
+   designed suite and what existing cases cover), the 9_Gaps review and the
    `--create-approved` dry run.

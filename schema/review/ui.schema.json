@@ -1,6 +1,27 @@
 {
   "type": "object",
   "properties": {
+    "inventory": {
+      "description": "Everything in scope that was seen in the UI, one item per functionality, whether or not it matches an expected scenario. Evidence only; it changes no verdict.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Stable id, e.g. UI-001." },
+          "screen": { "type": "string", "description": "Page or dialog name as shown." },
+          "url": { "type": "string" },
+          "functionality": { "type": "string", "description": "What the user can see or do." },
+          "action": { "type": "string", "description": "What you did (click, open, type), or 'observed' when you only looked." },
+          "result": { "type": "string", "description": "What happened, as seen." },
+          "element": { "type": "string", "description": "Role, accessible name and visible text of the control or message." },
+          "screenshot": { "type": "string", "description": "File name of the screenshot, e.g. UI-001_export-menu.png." },
+          "confidence": { "enum": ["HIGH", "MEDIUM", "LOW"], "description": "HIGH directly observed; MEDIUM seen but the workflow not verified; LOW limited evidence." },
+          "uncertainty": { "type": "string", "description": "What could not be verified and why (e.g. request blocked by read-only mode)." }
+        },
+        "required": ["id", "screen", "url", "functionality", "action", "result", "confidence"],
+        "additionalProperties": false
+      }
+    },
     "scenarios": {
       "type": "array",
       "items": {

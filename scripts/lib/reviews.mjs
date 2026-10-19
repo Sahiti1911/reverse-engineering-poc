@@ -139,11 +139,15 @@ export function applyCodeReview(ctx) {
   return applied;
 }
 
-/** context-builder: verdict overrides after spot-checking existing cases. */
+/** context-builder: the module context (what test design works from) and verdict overrides after spot-checking cases. */
 export function applyContextReview(ctx) {
   const review = loadReview(ctx, "context");
   if (!review) return 0;
   let applied = 0;
+  if (review.moduleContext) {
+    ctx.state.moduleContext = { ...review.moduleContext, by: REVIEW_AGENTS.context };
+    applied++;
+  }
   const missing = [];
   const autoAccept = ctx.cfg.matching.autoAcceptConfidence ?? ["High"];
   for (const o of review.overrides ?? []) {

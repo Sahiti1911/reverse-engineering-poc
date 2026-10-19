@@ -18,6 +18,8 @@ import { resolveClaudeBin, spawnClaude, usageRecord } from "./lib/claude.mjs";
 import { RunContext } from "./lib/context.mjs";
 import { STAGE_FUNCS } from "./lib/stages.mjs";
 import { loadReview } from "./lib/reviews.mjs";
+import { ensureSession } from "./lib/ui-session.mjs";
+import { collectScreenshots } from "./lib/agent-results.mjs";
 import { AGENTS, PHASES, resolvePipeline, resolveEnvironment, uiTools, checkUiMode, playwrightArgs, blockWritesScript } from "./lib/pipeline.mjs";
 import { TokenLog, totalTokens, summarizeTokens } from "./lib/tokens.mjs";
 import { readJson, writeJson, slug } from "./lib/util.mjs";
@@ -81,7 +83,9 @@ export function buildPrompt({ agent, rel, profile, moduleWords, keywords, limit,
     L.push(`UI mode: ${ui.mode} — ${{ observe: "navigate and read pages only; you have no click or type tools", "read-only": "you may click, type and open dialogs; the browser blocks every POST/PUT/PATCH/DELETE the app sends, so saving fails on purpose", full: "the app may save and delete data on this environment" }[ui.mode]}`);
     L.push(`Page budget: at most ${ui.maxPages} distinct pages or dialogs. Screenshots are saved under ${ui.outputDir}.`);
   }
-  if (agent.review) L.push(`Your review file (optional, only if you change something): ${rel}/review/${agent.review}.json — schema: schema/review/${agent.review}.schema.json`);
+  if (agent.name === "ui-explorer") L.push(`Your review file (always write it, with the inventory of what you saw): ${rel}/review/ui.json — schema: schema/review/ui.schema.json`);
+  else if (agent.name === "context-builder") L.push(`Your review file (always write it, with the module context): ${rel}/review/context.json — schema: schema/review/context.schema.json`);
+  else if (agent.review) L.push(`Your review file (optional, only if you change something): ${rel}/review/${agent.review}.json — schema: schema/review/${agent.review}.schema.json`);
   L.push("");
   L.push("Commands you may run:");
   if (agent.name === "module-scout") {
@@ -92,7 +96,7 @@ export function buildPrompt({ agent, rel, profile, moduleWords, keywords, limit,
   } else if (agent.stage !== "report") {
     L.push(`  (The ${agent.stage} stage has ALREADY been run for you — do not run it; review its results.)`);
   }
-  L.push(`  node scripts/inspect.mjs --run-dir ${rel} --what <stories|story|scenarios|code|candidates|matches|gaps|validation|handoffs> [--key KEY] [--filter text]`);
+  L.push(`  node scripts/inspect.mjs --run-dir ${rel} --what <stories|story|scenarios|code|ui|inventory|context|candidates|matches|gaps|validation|handoffs> [--key KEY] [--filter text]`);
   L.push("");
   if (previous.length) {
     L.push("Findings forwarded by the earlier agents:");
@@ -117,18 +121,32 @@ export function buildPrompt({ agent, rel, profile, moduleWords, keywords, limit,
   return L.join("\n");
 }
 
-function latestRunDir(profile, moduleWords) {
+/** Run folders of one module, oldest first: <date>_agents-<slug>[_vNNN] (no version = an older, unversioned run). */
+function runDirs(profile, moduleWords) {
   const base = path.join(ROOT, "runs", profile.name);
-  const suffix = `_agents-${slug(moduleWords)}`;
-  const dirs = fs.existsSync(base) ? fs.readdirSync(base).filter((d) => d.endsWith(suffix)).sort() : [];
-  return dirs.length ? path.join(base, dirs.at(-1)) : null;
+  const rx = new RegExp(`^(\\d{4}-\\d{2}-\\d{2})_agents-${slug(moduleWords).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:_v(\\d+))?$`);
+  const dirs = fs.existsSync(base) ? fs.readdirSync(base).map((d) => ({ d, m: d.match(rx) })).filter((x) => x.m) : [];
+  return dirs
+    .map(({ d, m }) => ({ dir: path.join(base, d), date: m[1], version: Number(m[2] ?? 0) }))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.version - b.version);
+}
+
+function latestRunDir(profile, moduleWords) {
+  return runDirs(profile, moduleWords).at(-1)?.dir ?? null;
+}
+
+/** Every agents.mjs run gets its own folder: <date>_agents-<slug>_v<next>, so earlier runs stay as they were. */
+function newRunDir(profile, moduleWords) {
+  const date = new Date().toISOString().slice(0, 10);
+  const next = Math.max(0, ...runDirs(profile, moduleWords).filter((x) => x.date === date).map((x) => x.version)) + 1;
+  return path.join(ROOT, "runs", profile.name, `${date}_agents-${slug(moduleWords)}_v${String(next).padStart(3, "0")}`);
 }
 
 /**
  * MCP servers for one run: the project's servers (.mcp.json) plus Playwright when the UI explorer runs.
  * Returns { file, ui } where ui is null when the UI explorer cannot run (with the reason in `uiProblem`).
  */
-function prepareMcp({ runDir, cfg, envName, uiWanted }) {
+function prepareMcp({ runDir, cfg, envName, uiWanted, uiSession = null }) {
   const servers = { ...readJson(path.join(ROOT, ".mcp.json")).mcpServers };
   let ui = null;
   let uiProblem = null;
@@ -145,6 +163,9 @@ function prepareMcp({ runDir, cfg, envName, uiWanted }) {
         storageStatePath = path.resolve(ROOT, env.login.storageState ?? "");
         if (!env.login.storageState || !fs.existsSync(storageStatePath)) {
           throw new Error(`No saved login for environment '${env.name}' at ${env.login.storageState}. Run: npm run ui-login -- --env ${env.name}`);
+        }
+        if (uiSession && !uiSession.ok) {
+          throw new Error(`Saved login for '${env.name}' is not valid (${uiSession.problem}). Run: npm run ui-login -- --env ${env.name}`);
         }
       }
       let initScriptPath = null;
@@ -200,11 +221,21 @@ Pipeline (config/config.yaml): ${phases.map((p) => p.agents.map((x) => x.name).j
   const skip = new Set((a.skip ?? "").split(",").filter(Boolean));
   if (skip.has("module-scout")) throw new Error("module-scout cannot be skipped: it decides the scope. Use run.mjs --scope module:<path> for a plain pipeline run.");
 
-  let runDir = a["run-dir"] ? path.resolve(a["run-dir"]) : fromPhase > 0 ? latestRunDir(profile, a.module) : null;
-  if (fromPhase > 0 && !runDir) throw new Error(`--from ${a.from}: no earlier agent run found for "${a.module}". Pass --run-dir.`);
-  if (!runDir) runDir = path.join(ROOT, "runs", profile.name, `${new Date().toISOString().slice(0, 10)}_agents-${slug(a.module)}`);
+  // --run-dir works in that folder as given. Otherwise every run is a new version folder; a resumed run (--from)
+  // starts as a copy of the latest version, so the earlier version keeps its results and workbook untouched.
+  let runDir = a["run-dir"] ? path.resolve(a["run-dir"]) : null;
+  let resumedFrom = null;
+  if (!runDir) {
+    if (fromPhase > 0) {
+      resumedFrom = latestRunDir(profile, a.module);
+      if (!resumedFrom) throw new Error(`--from ${a.from}: no earlier agent run found for "${a.module}". Pass --run-dir.`);
+    }
+    runDir = newRunDir(profile, a.module);
+    if (resumedFrom) fs.cpSync(resumedFrom, runDir, { recursive: true });
+  }
   // Agents that run again write fresh reviews and handoffs; stale ones would be merged on top of new results.
-  const rerun = configuredAgents.filter((x) => phaseOf(x.name) >= fromPhase);
+  // A skipped agent keeps its earlier handoff and review, so its findings and changes are not lost.
+  const rerun = configuredAgents.filter((x) => phaseOf(x.name) >= fromPhase && !skip.has(x.name));
   if (fromPhase === 0) {
     fs.rmSync(path.join(runDir, "handoff"), { recursive: true, force: true });
     fs.rmSync(path.join(runDir, "review"), { recursive: true, force: true });
@@ -212,14 +243,29 @@ Pipeline (config/config.yaml): ${phases.map((p) => p.agents.map((x) => x.name).j
   } else {
     for (const x of rerun.filter((y) => y.review)) fs.rmSync(path.join(runDir, "review", `${x.review}.json`), { force: true });
   }
+  if (rerun.some((x) => x.name === "ui-explorer")) fs.rmSync(path.join(runDir, "ui"), { recursive: true, force: true });
+  writeJson(path.join(runDir, "version.json"), {
+    run: path.basename(runDir), startedAt: new Date().toISOString(), resumedFrom: resumedFrom ? path.basename(resumedFrom) : null,
+    module: a.module, from: a.from ?? null, until: a.until ?? null, skip: [...skip], env: a.env ?? cfg.environment ?? null,
+  });
   fs.mkdirSync(path.join(runDir, "handoff"), { recursive: true });
   fs.mkdirSync(path.join(runDir, "review"), { recursive: true });
   const rel = path.relative(ROOT, runDir).split(path.sep).join("/");
+  const log = (m) => console.log(`[${new Date().toISOString().slice(11, 19)}] ${m}`);
   const bin = resolveClaudeBin(cfg.claude.bin);
   const handoffSchema = readJson(path.join(ROOT, "schema", "handoff.schema.json"));
-  const log = (m) => console.log(`[${new Date().toISOString().slice(11, 19)}] ${m}`);
   const uiWanted = names.includes("ui-explorer") && !skip.has("ui-explorer") && untilPhase >= phaseOf("ui-explorer") && fromPhase <= phaseOf("ui-explorer");
-  const mcp = prepareMcp({ runDir, cfg, envName: a.env, uiWanted });
+  // Reuse the saved login; log in again by script (0 tokens) only when it is invalid or expired.
+  let uiSession = null;
+  if (uiWanted) {
+    try {
+      uiSession = await ensureSession(resolveEnvironment(cfg, a.env), { log });
+      if (uiSession.relogged) log("UI: logged in again and saved a fresh session.");
+    } catch (err) {
+      uiSession = { ok: false, problem: err.message };
+    }
+  }
+  const mcp = prepareMcp({ runDir, cfg, envName: a.env, uiWanted, uiSession });
   log(`Agent pipeline for "${a.module}" (profile ${profile.name}) → ${rel}`);
   log(`Phases: ${phases.map((p) => `${p.phase}[${p.agents.map((x) => x.name).join(", ")}]`).join(" → ")}`);
   if (mcp.ui) log(`UI: ${mcp.ui.envName} ${mcp.ui.baseUrl} (mode ${mcp.ui.mode})`);
@@ -246,6 +292,13 @@ Pipeline (config/config.yaml): ${phases.map((p) => p.agents.map((x) => x.name).j
   const runAgent = async (agent, phaseIdx, { redesign = null } = {}) => {
     const base = { order: order.get(agent.name), agent: agent.name };
     if (skip.has(agent.name)) {
+      const earlier = readJson(handoffPath(agent.name), null);
+      if (earlier && earlier.status && !String(earlier.findings?.[0] ?? "").startsWith("Skipped by --skip")) {
+        log(`${agent.name}: skipped, keeping its result from ${earlier.reusedFrom ?? (resumedFrom ? path.basename(resumedFrom) : "the earlier run")}`);
+        const kept = { ...earlier, reusedFrom: earlier.reusedFrom ?? (resumedFrom ? path.basename(resumedFrom) : "earlier run") };
+        writeJson(handoffPath(agent.name), kept);
+        return kept;
+      }
       return finishHandoff(agent, { ...base, status: "ok", findings: [`Skipped by --skip; ${agent.stage ? `stage ${agent.stage} ran without agent review` : "no exploration done"}.`], forwardNotes: "", outputs: [], tokens: 0 });
     }
     if (agent.name === "ui-explorer" && !mcp.ui) {
@@ -279,6 +332,10 @@ Pipeline (config/config.yaml): ${phases.map((p) => p.agents.map((x) => x.name).j
       handoff = { status: "failed", findings: [`Agent process failed: ${err.message.slice(0, 300)}`], forwardNotes: "", outputs: [], tokens: 0 };
     }
     Object.assign(handoff, base, { model: model ?? "", durationMs: Date.now() - started });
+    if (agent.name === "ui-explorer") {
+      const moved = collectScreenshots({ fromDir: ROOT, toDir: path.join(runDir, "ui"), since: started - 1000 });
+      if (moved.length) log(`ui-explorer: moved ${moved.length} screenshot(s) from the working directory into ${rel}/ui`);
+    }
 
     // Validate the review file now, so a bad one is reported here instead of failing a later stage.
     if (agent.review && fs.existsSync(path.join(runDir, "review", `${agent.review}.json`)) && stateExists()) {

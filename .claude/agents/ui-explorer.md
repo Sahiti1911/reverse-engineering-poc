@@ -25,7 +25,15 @@ Your prompt gives the environment URL, the UI mode (which tools you have) and a 
      allows typing. In read-only mode a save request fails on purpose: report the client-side behaviour,
      not the failed request.
    - Never try to get around the mode: no other URLs than the given origin, no file uploads, no scripts.
-4. **Write your review file** (`schema/review/ui.schema.json`):
+4. **Write your review file** (`schema/review/ui.schema.json`). Always write it, even when nothing is new:
+   it is the evidence of your exploration in the workbook (5_UI_Exploration) and coverage.json.
+   - `inventory`: every in-scope thing you saw, one item per functionality (a menu entry, a button, a dialog,
+     a column set, a message, a disabled state). Give the action you took and the result you saw, the element
+     (role, accessible name, visible text), a confidence (HIGH directly observed, MEDIUM seen but the workflow
+     could not be finished, LOW limited evidence) and in `uncertainty` what stopped you (e.g. a request blocked
+     by read-only mode). Take a screenshot for each item with `browser_take_screenshot` and
+     `filename: "<id>_<short-name>.png"`, and put that file name in `screenshot`. Never capture credentials,
+     tokens or personal data.
    - `observations`: for expected scenarios you could check, `observed` (the UI offers it), `not-found`
      (the screen has no such control or message) or `different` (it exists but behaves or is labelled
      differently). Cite what you saw.

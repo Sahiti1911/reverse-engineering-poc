@@ -12,9 +12,14 @@ import { getSteps, caseUrl } from "./zephyr.mjs";
 import { ensureRepo, collectModuleCode, codeUrl } from "./code.mjs";
 import { selectCandidates, folderCandidates } from "./candidates.mjs";
 import { buildWorkbook, readGapSheet } from "./workbook.mjs";
+import { collectAgentResults } from "./agent-results.mjs";
+import { writeModuleContext } from "./module-context.mjs";
+import { runHeader, runFiles, coverageJson, agentsJson } from "./run-outputs.mjs";
+import { resolvePipeline } from "./pipeline.mjs";
 import { writeSummary } from "./report.mjs";
-import { applyScoutReview, applyRequirementsReview, applyCodeReview, applyUiReview, applyZephyrReview, applyContextReview, applyDraftsReview, applyValidationReview } from "./reviews.mjs";
+import { applyScoutReview, applyRequirementsReview, applyCodeReview, applyUiReview, applyZephyrReview, applyContextReview, applyDraftsReview, applyValidationReview, primaryStory } from "./reviews.mjs";
 import { validateGap } from "./validate.mjs";
+import { needsDraft, designInput, normalizeSuite, checkCandidates, inheritedCheck, untracedScenarioGaps, designGap } from "./test-design.mjs";
 import { chunk, promisePool, truncate, hash, writeJson, readJson } from "./util.mjs";
 
 const blankResult = (story, triage) => ({
@@ -461,30 +466,50 @@ export async function contextStage(ctx) {
 }
 
 // ---------------------------------------------------------------- 6. draft
+/**
+ * Context-first test design. With a module context (agent runs): design the module's whole test suite from it,
+ * check every designed case against the existing Zephyr cases, and turn the ones nothing covers into gaps.
+ * Scenario gaps that no designed case picked up stay gaps of their own. Without a module context, or when the
+ * design call returns nothing, the gaps are the scenario verdicts as before. Then every gap gets a draft.
+ */
 export async function draftStage(ctx) {
   const { profile, cfg } = ctx;
   applyContextReview(ctx);
+  const moduleContext = ctx.state.moduleContext ?? null;
+  if (moduleContext) writeModuleContext(ctx.runDir, moduleContext, { title: `Module context — ${ctx.state.scope.moduleFilter ?? ctx.state.scope.value ?? ""}` });
+  // The whole module context goes to every draft batch; cap it so a huge context cannot crowd out the gaps.
+  const contextText = moduleContext ? truncate(JSON.stringify({ ...moduleContext, by: undefined }), cfg.limits.moduleContextChars ?? 20000) : null;
   ctx.clearErrors("draft");
   for (const r of ctx.stories) r.gaps = [];
+  delete ctx.state.testDesign;
   const zephyr = await ctx.zephyr();
   const folderPath = new Map(zephyr.folders.map((f) => [f.id, f.path]));
+  const autoAccept = cfg.matching.autoAcceptConfidence ?? ["High"];
+  const rows = ctx.testable().filter((r) => r.expected.length);
 
-  await promisePool(ctx.testable(), ctx.concurrency, async (r) => {
+  const suite = moduleContext && rows.length ? await designSuite(ctx, moduleContext, rows) : null;
+  // What each gap is drafted from: a designed case, or a scenario no designed case picked up.
+  const basisOf = new Map();
+  if (suite) {
+    for (const tc of suite.filter((x) => needsDraft(x.check.verdict, x.check.confidence, autoAccept))) {
+      const g = designGap(tc, tc.check, moduleContext.rules);
+      tc.gapId = g.gapId;
+      rows.find((x) => x.story.key === tc.storyKey).gaps.push(g);
+      basisOf.set(g.gapId, { title: tc.title, flow: tc.flow, type: tc.type, steps: tc.steps, expected: tc.expected, source: "context", basis: tc.basis, whyNeeded: tc.whyNeeded, scenarioIds: tc.scenarioIds });
+    }
+    const untraced = untracedScenarioGaps(rows, suite, autoAccept);
+    for (const { row, match } of untraced) row.gaps.push(scenarioGap(row, match, basisOf, " (No designed case covers this scenario, so it is drafted from the scenario.)"));
+    const designedGaps = suite.filter((x) => x.gapId).length;
+    ctx.step("draft", { batch: "test design", in: suite.length, out: designedGaps + untraced.length, notes: `${designedGaps} of ${suite.length} designed case(s) are not covered by existing cases; ${untraced.length} scenario gap(s) the design did not pick up are drafted from the scenario.` });
+  } else {
+    for (const r of rows) {
+      const ids = new Set(r.expected.map((e) => e.id));
+      for (const m of r.matches.filter((x) => ids.has(x.expectedId) && needsDraft(x.verdict, x.confidence, autoAccept))) r.gaps.push(scenarioGap(r, m, basisOf, ""));
+    }
+  }
+
+  await promisePool(rows.filter((r) => r.gaps.length), ctx.concurrency, async (r) => {
     const s = r.story;
-    const byId = new Map(r.expected.map((e) => [e.id, e]));
-    const gapMatches = r.matches.filter((m) => byId.has(m.expectedId) && (m.verdict !== "Covered" || (!m.autoAccepted && m.confidence === "Low")));
-    if (!gapMatches.length) return;
-    r.gaps = gapMatches.map((m) => {
-      const e = byId.get(m.expectedId);
-      const verdict = m.verdict === "Covered" ? "Unverified" : m.verdict;
-      const why = m.verdict === "Covered" ? `Possibly covered by ${m.matchedKeys.join(", ")} but only with Low confidence. ${m.reasoning}` : m.reasoning;
-      return {
-        gapId: `GAP-${m.expectedId.replace(/:/g, "-")}`, expectedId: m.expectedId, scenario: e.title, source: e.source, type: e.type, verdict,
-        matchedKeys: m.matchedKeys, missingAspects: m.missingAspects, codeReview: e.codeReview ?? "", suspectedBug: !!e.suspectedBug,
-        uiCheck: e.uiCheck ?? "",
-        reasoning: `${why}${m.missingAspects ? ` Missing: ${m.missingAspects}` : ""}${e.codeOnly ? " (Code-only scenario.)" : ""}${e.source === "ui" ? " (Seen in the UI only.)" : ""}`,
-      };
-    });
     const folders = folderCandidates({ story: s, candidates: r.candidates, zephyr, profile, limit: cfg.limits.folderCandidates });
     const partialCases = [...new Set(r.gaps.flatMap((g) => g.matchedKeys))].map((k) => ({ key: k, name: zephyr.byKey.get(k)?.name }));
     const chunks = chunk(r.gaps, cfg.batch.draft ?? 12);
@@ -493,10 +518,8 @@ export async function draftStage(ctx) {
       const label = chunks.length > 1 ? `${s.key} part ${i + 1}/${chunks.length}` : s.key;
       const input = {
         story: { key: s.key, summary: s.summary, module: s.module, context: truncate(s.descriptionText, 3000) },
-        gaps: gaps.map((g) => {
-          const e = byId.get(g.expectedId);
-          return { gapId: g.gapId, verdict: g.verdict, scenario: { title: e.title, flow: e.flow, type: e.type, steps: e.steps, expected: e.expected, source: e.source, codeOnly: e.codeOnly, codeReview: e.codeReview ?? "" }, matchedKeys: g.matchedKeys, missingAspects: g.missingAspects };
-        }),
+        ...(contextText ? { moduleContext: contextText } : {}),
+        gaps: gaps.map((g) => ({ gapId: g.gapId, verdict: g.verdict, scenario: basisOf.get(g.gapId), matchedKeys: g.matchedKeys, missingAspects: g.missingAspects })),
         partialCases: partialCases.filter((c) => gaps.some((g) => g.matchedKeys.includes(c.key))),
         folderCandidates: folders.map((f) => ({ id: f.id, path: f.path, why: f.why })),
         styleExamples: r.candidates.filter((c) => c.linked).slice(0, 5).map((c) => zephyr.byKey.get(c.key).name),
@@ -521,6 +544,93 @@ export async function draftStage(ctx) {
   ctx.markDone("draft");
 }
 
+/** A gap drafted from one scenario verdict (no module context, or a scenario the design did not pick up). */
+function scenarioGap(r, m, basisOf, note) {
+  const e = r.expected.find((x) => x.id === m.expectedId);
+  const verdict = m.verdict === "Covered" ? "Unverified" : m.verdict;
+  const why = m.verdict === "Covered" ? `Possibly covered by ${m.matchedKeys.join(", ")} but only with Low confidence. ${m.reasoning}` : m.reasoning;
+  const gapId = `GAP-${m.expectedId.replace(/:/g, "-")}`;
+  basisOf.set(gapId, { title: e.title, flow: e.flow, type: e.type, steps: e.steps, expected: e.expected, source: e.source, codeOnly: e.codeOnly, codeReview: e.codeReview ?? "" });
+  return {
+    gapId, expectedId: m.expectedId, scenario: e.title, source: e.source, type: e.type, verdict,
+    matchedKeys: m.matchedKeys, missingAspects: m.missingAspects, codeReview: e.codeReview ?? "", suspectedBug: !!e.suspectedBug,
+    uiCheck: e.uiCheck ?? "",
+    reasoning: `${why}${m.missingAspects ? ` Missing: ${m.missingAspects}` : ""}${e.codeOnly ? " (Code-only scenario.)" : ""}${e.source === "ui" ? " (Seen in the UI only.)" : ""}${note}`,
+  };
+}
+
+/**
+ * design + check: the test suite the module should have (one Claude call over the module context), then per
+ * story whether existing Zephyr cases already test each designed case. Saved in state.testDesign. Returns the
+ * checked cases, or null when the design produced nothing (the stage then drafts from the scenario gaps).
+ */
+async function designSuite(ctx, moduleContext, rows) {
+  const input = designInput({ moduleContext, rows, maxContextChars: ctx.cfg.limits.designContextChars ?? 40000 });
+  const module = ctx.state.scope.moduleFilter ?? rows[0].story.module;
+  let res;
+  try {
+    res = await ctx.llmRun("design", {
+      cacheKey: `design-${module}`, fingerprint: input, prompt: JSON.stringify(input), jiraKeys: rows.map((r) => r.story.key), module,
+      itemsIn: input.scenarios.length, countOut: (o) => o.cases.length,
+    });
+  } catch (err) {
+    ctx.step("design", { errors: `Design failed, drafting from the scenarios instead: ${err.message.slice(0, 250)}` });
+    return null;
+  }
+  if (!res.output?.cases.length) {
+    ctx.step("design", { notes: `No designed cases (${res.output ? "empty answer" : ctx.skipReason(res)}); drafting from the scenarios instead.` });
+    return null;
+  }
+  const { cases, notes } = normalizeSuite(res.output.cases, rows, primaryStory(rows)?.story.key ?? rows[0].story.key);
+  ctx.step("design", { in: input.scenarios.length, out: cases.length, notes: [`${res.reused ? "cache; " : ""}${cases.length} case(s) designed from the module context.`, res.output.notes, ...notes].filter(Boolean).join(" ") });
+
+  const matchById = new Map(rows.flatMap((r) => r.matches.map((m) => [m.expectedId, m])));
+  const storyOf = new Map(rows.flatMap((r) => r.expected.map((e) => [e.id, r.story.key])));
+  await promisePool(rows, ctx.concurrency, async (r) => {
+    const own = cases.filter((c) => c.storyKey === r.story.key);
+    // Cases whose scenarios already settle the verdict are not sent to Claude again.
+    for (const tc of own) tc.check = inheritedCheck(tc, matchById, storyOf) ?? undefined;
+    const inherited = own.filter((tc) => tc.check).length;
+    const mine = own.filter((tc) => !tc.check);
+    if (!mine.length) {
+      if (inherited) ctx.step("check", { batch: r.story.key, in: own.length, out: 0, notes: `All ${inherited} designed case(s) keep their scenarios' verdict (0 tokens).` });
+      return;
+    }
+    const missing =(reasoning, confidence = "Low", decidedBy = "fallback") => ({ verdict: "Missing", matchedKeys: [], confidence, missingAspects: "", decidedBy, reasoning });
+    const pool = checkCandidates(r, mine, rows);
+    if (!pool.length) {
+      for (const tc of mine) tc.check = missing(`No existing Zephyr case was found for ${r.story.key} (no linked, folder or keyword candidates), so nothing can cover it.`, "High", "rule");
+      ctx.step("check", { batch: r.story.key, in: mine.length, out: 0, notes: `No candidates: ${mine.length} designed case(s) Missing${inherited ? `, ${inherited} kept their scenarios' verdict` : ""} (0 tokens).` });
+      return;
+    }
+    const checkInput = {
+      story: { key: r.story.key, summary: r.story.summary },
+      designed: mine.map(({ tcId, title, steps, expected }) => ({ tcId, title, steps, expected })),
+      candidates: pool.map(({ key, linked, name, folder, objective, precondition, steps }) => ({ key, linked, name, folder, objective, precondition, steps })),
+    };
+    try {
+      const out = await ctx.llmRun("check", {
+        cacheKey: `check-${r.story.key}`, fingerprint: checkInput, prompt: JSON.stringify(checkInput), jiraKeys: [r.story.key], module: r.story.module,
+        itemsIn: mine.length, countOut: (o) => o.results.length,
+      });
+      const keys = new Set(pool.map((c) => c.key));
+      for (const tc of mine) {
+        const x = out.output?.results.find((y) => y.tcId === tc.tcId);
+        tc.check = x
+          ? { ...x, matchedKeys: x.matchedKeys.filter((k) => keys.has(k)), decidedBy: "LLM" }
+          : missing(out.output ? "The check returned no verdict for this case; treated as Missing so it gets reviewed." : `Not checked (${ctx.skipReason(out)}); treated as Missing so it gets reviewed.`);
+      }
+      const counts = ["Covered", "Partial", "Missing"].map((v) => `${v} ${mine.filter((c) => c.check.verdict === v).length}`).join(", ");
+      ctx.step("check", { batch: r.story.key, in: mine.length, out: out.output?.results.length ?? 0, notes: `${out.reused ? "cache; " : ""}${pool.length} existing case(s) → ${counts}${inherited ? `; ${inherited} more kept their scenarios' verdict (not judged again)` : ""}.` });
+    } catch (err) {
+      for (const tc of mine) tc.check = missing(`The check failed (${err.message.slice(0, 120)}); treated as Missing so it gets reviewed.`);
+      ctx.step("check", { batch: r.story.key, errors: err.message.slice(0, 300) });
+    }
+  });
+  ctx.state.testDesign = { cases, notes: res.output.notes ?? "" };
+  return cases;
+}
+
 // ---------------------------------------------------------------- 7. validate
 /** Rule checks on the drafts (0 tokens): undrafted gaps and drafts whose name duplicates an existing case. */
 export async function validateStage(ctx) {
@@ -537,22 +647,6 @@ export async function validateStage(ctx) {
   }
   ctx.step("validate", { in: Object.values(counts).reduce((a, b) => a + b, 0), out: counts.ok, notes: `Rule checks: ${counts.ok} ok, ${counts["possible-duplicate"]} possible duplicate(s), ${counts.undrafted} undrafted.` });
   ctx.markDone("validate");
-}
-
-/** coverage.json: the machine-readable twin of the workbook (scenarios, verdicts, gaps with drafts). */
-function writeCoverageJson(ctx, stories, { workbookPath }) {
-  const file = path.join(ctx.runDir, "coverage.json");
-  writeJson(file, {
-    runAt: ctx.state.runAt, profile: ctx.profile.name, scope: { jql: ctx.state.scope.jql, module: ctx.state.scope.moduleFilter, keywords: ctx.state.scope.keywords },
-    workbook: path.basename(workbookPath),
-    stories: stories.map((r) => ({
-      key: r.story.key, summary: r.story.summary, module: r.story.module, testable: r.triage.testable, dropped: r.dropped ?? null,
-      scenarios: r.expected.map(({ id, source, flow, type, title, steps, expected, evidence, uiCheck, codeReview, suspectedBug, reasoning }) => ({ id, source, flow, type, title, steps, expected, evidence, uiCheck, codeReview, suspectedBug, reasoning })),
-      verdicts: r.matches.map(({ expectedId, verdict, confidence, matchedKeys, missingAspects, decidedBy, reasoning }) => ({ expectedId, verdict, confidence, matchedKeys, missingAspects, decidedBy, reasoning })),
-      gaps: r.gaps.map(({ gapId, expectedId, verdict, source, draft, validation, reviewDecision, createdKey, reasoning }) => ({ gapId, expectedId, verdict, source, draft, validation, reviewDecision, createdKey, reasoning })),
-    })),
-  });
-  return file;
 }
 
 // ---------------------------------------------------------------- 8. report
@@ -602,6 +696,15 @@ export async function reportStage(ctx, { out } = {}) {
   };
   const ordered = [...ctx.stories].sort((a, b) => a.story.module.localeCompare(b.story.module) || a.story.key.localeCompare(b.story.key));
   const handoffs = ctx.handoffs();
+  // Agent runs only: every agent's handoff, review file and UI evidence, for the workbook and the JSON files.
+  const agentResults = handoffs.length
+    ? collectAgentResults({ runDir: ctx.runDir, agents: resolvePipeline(cfg).flatMap((p) => p.agents), handoffs, runLog: state.runLog })
+    : null;
+  const moduleContext = state.moduleContext ?? null;
+  if (moduleContext) writeModuleContext(ctx.runDir, moduleContext, { title: `Module context — ${scope.moduleFilter ?? scope.value ?? ""}` });
+  const run = runHeader({ runDir: ctx.runDir, state, profile });
+  const files = runFiles({ runDir: ctx.runDir, workbookPath, agentRun: !!agentResults, hasContext: !!moduleContext, hasUi: !!agentResults?.ui });
+  if (agentResults) writeJson(path.join(ctx.runDir, "agents.json"), agentsJson({ run, files, agents: agentResults.agents }));
   const runInfo = {
     runAt: state.runAt, zephyrExportedAt: state.zephyrExportedAt ?? zephyr.exportedAt, codeCommits: state.codeCommits.join(", "),
     autoAccept: (cfg.matching.autoAcceptConfidence ?? ["High"]).join("/"),
@@ -611,13 +714,14 @@ export async function reportStage(ctx, { out } = {}) {
   ctx.save();
   let built;
   try {
-    built = await buildWorkbook({ file: workbookPath, profile, scope, stories: ordered, zephyr, tokenRecords: ctx.tokenLog.records, runLog: state.runLog, runInfo, urls, handoffs });
+    built = await buildWorkbook({ file: workbookPath, profile, scope, stories: ordered, zephyr, tokenRecords: ctx.tokenLog.records, runLog: state.runLog, runInfo, urls, handoffs, agentResults, moduleContext, testDesign: state.testDesign ?? null });
   } catch (err) {
     if (err.code === "EBUSY") throw new Error(`${workbookPath} is open in another program (Excel?). Close it and re-run the report stage; nothing else needs repeating.`);
     throw err;
   }
-  const summary = writeSummary({ ctx, built, workbookPath, handoffs });
-  const jsonPath = writeCoverageJson(ctx, ordered, { workbookPath });
+  const summary = writeSummary({ ctx, built, workbookPath, handoffs, run, files });
+  const jsonPath = path.join(ctx.runDir, files.coverage);
+  writeJson(jsonPath, coverageJson({ run, files, counts: built.counts, moduleContext, testDesign: state.testDesign ?? null, ui: agentResults?.ui ?? null, stories: ordered }));
   // The baseline moves only when a real run finished without hitting the token budget.
   if (!ctx.dryRun && !state.budgetHit && scope.baselineKey) writeJson(baselineFile(profile.name), { ...readBaseline(profile.name), [scope.baselineKey]: state.runAt });
   return { built, workbookPath, summaryPath: summary.file, jsonPath };

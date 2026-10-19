@@ -40,7 +40,139 @@
         ],
         "additionalProperties": false
       }
+    },
+    "moduleContext": {
+      "description": "Everything known about the module or feature, joined from stories, code, UI and Zephyr. Test cases are designed from it. Every item cites its sources: story keys / UC ids, CODE-xx ids or file paths, UI inventory ids, Zephyr case keys.",
+      "type": "object",
+      "properties": {
+        "overview": { "type": "string", "description": "What the feature is, who uses it and why, in a few sentences." },
+        "screens": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "route": { "type": "string" },
+              "reachedFrom": { "type": "string", "description": "How a tester gets there (menu path, button)." },
+              "elements": { "type": "array", "items": { "type": "string" }, "description": "Controls, columns, dialogs, menus relevant to the feature." },
+              "sources": { "$ref": "#/$defs/sources" }
+            },
+            "required": ["name", "sources"],
+            "additionalProperties": false
+          }
+        },
+        "workflows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "steps": { "type": "array", "items": { "type": "string" } },
+              "outcome": { "type": "string", "description": "The checkable end state." },
+              "sources": { "$ref": "#/$defs/sources" }
+            },
+            "required": ["name", "steps", "outcome", "sources"],
+            "additionalProperties": false
+          }
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "description": "R-01, R-02, …" },
+              "kind": { "enum": ["business", "validation", "permission", "configuration", "error", "integration", "data"] },
+              "rule": { "type": "string" },
+              "expected": { "type": "string", "description": "What a tester observes when the rule applies." },
+              "status": { "enum": ["confirmed", "story-only", "code-only", "ui-only", "needs-confirmation", "suspected-bug"] },
+              "sources": { "$ref": "#/$defs/sources" }
+            },
+            "required": ["id", "kind", "rule", "expected", "status", "sources"],
+            "additionalProperties": false
+          }
+        },
+        "apis": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "method": { "type": "string" },
+              "path": { "type": "string" },
+              "purpose": { "type": "string" },
+              "permission": { "type": "string" },
+              "sources": { "$ref": "#/$defs/sources" }
+            },
+            "required": ["method", "path", "purpose", "sources"],
+            "additionalProperties": false
+          }
+        },
+        "uiTexts": {
+          "type": "array",
+          "description": "Exact labels and messages, only as seen in the UI, the code/translations or a story. Test steps may quote only these.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "text": { "type": "string" },
+              "where": { "type": "string" },
+              "sources": { "$ref": "#/$defs/sources" }
+            },
+            "required": ["text", "where", "sources"],
+            "additionalProperties": false
+          }
+        },
+        "testData": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "need": { "type": "string", "description": "Precondition or data a test needs (role, records, config value)." },
+              "how": { "type": "string", "description": "How to get it on the test environment." }
+            },
+            "required": ["need", "how"],
+            "additionalProperties": false
+          }
+        },
+        "existingCoverage": {
+          "type": "object",
+          "properties": {
+            "folders": { "type": "array", "items": { "type": "string" } },
+            "namingPattern": { "type": "string" },
+            "summary": { "type": "string", "description": "What the existing cases test and what they never test." }
+          },
+          "additionalProperties": false
+        },
+        "openQuestions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "question": { "type": "string" },
+              "affects": { "type": "array", "items": { "type": "string" }, "description": "Scenario or rule ids." },
+              "sources": { "$ref": "#/$defs/sources" }
+            },
+            "required": ["question", "sources"],
+            "additionalProperties": false
+          }
+        },
+        "knownIssues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "issue": { "type": "string" },
+              "sources": { "$ref": "#/$defs/sources" }
+            },
+            "required": ["issue", "sources"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["overview", "screens", "workflows", "rules"],
+      "additionalProperties": false
     }
+  },
+  "$defs": {
+    "sources": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
   },
   "additionalProperties": false
 }

@@ -406,7 +406,7 @@ const minimalRun = (overrides = {}) => ({
 test("buildWorkbook writes all sheets, prefills the review decision and reads back", async () => {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cov-")), "w.xlsx");
   const out = await buildWorkbook({ file, ...minimalRun() });
-  assert.deepEqual(out.sheets, ["Summary", "1_Story_Triage", "2_Link_Check", "3_Expected_Scenarios", "4_Zephyr_Cases", "5_Matching", "6_Gaps", "7_Orphan_Zephyr", "8_Run_Log", "9_Token_Usage"]);
+  assert.deepEqual(out.sheets, ["Summary", "1_Module_Context", "2_Story_Triage", "3_Link_Check", "4_Expected_Scenarios", "5_UI_Exploration", "6_Zephyr_Cases", "7_Matching", "8_Test_Design", "9_Gaps", "10_Orphan_Zephyr", "11_Agents", "12_Agent_Reviews", "13_Run_Log", "14_Token_Usage"]);
   const back = await readGapSheet(file);
   assert.equal(back.profileName, "avl");
   assert.equal(back.rows[0]["Review decision"], "Approve");
@@ -418,7 +418,20 @@ test("buildWorkbook refuses rows without reasoning", async () => {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cov-")), "w.xlsx");
   const run = minimalRun();
   run.stories[0].triage.reasoning = "";
-  await assert.rejects(buildWorkbook({ file, ...run }), /without reasoning[\s\S]*1_Story_Triage: AVLN-1/);
+  await assert.rejects(buildWorkbook({ file, ...run }), /without reasoning[\s\S]*2_Story_Triage: AVLN-1/);
+});
+
+test("readGapSheet still reads older workbooks whose review sheet is 6_Gaps", async () => {
+  const { default: ExcelJS } = await import("exceljs");
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cov-")), "old.xlsx");
+  const wb = new ExcelJS.Workbook();
+  wb.subject = "avl";
+  const ws = wb.addWorksheet("6_Gaps");
+  ws.addRow(["Gap ID", "Review decision"]);
+  ws.addRow(["GAP-1", "Reject"]);
+  await wb.xlsx.writeFile(file);
+  const back = await readGapSheet(file);
+  assert.deepEqual([back.ws.name, back.rows[0]["Gap ID"], back.rows[0]["Review decision"]], ["6_Gaps", "GAP-1", "Reject"]);
 });
 
 // A miniature of the AVL export wiring: page → client-linked service → job model ← handlers (one per grid).
@@ -624,4 +637,211 @@ test("keyword triangulation: candidates, scoring, choice, code bridge, location 
 
   const folder = dominantFolder(["Ridango > AVL > Data Export (grid Export)", "Ridango > AVL > Data Export (grid Export)", "Ridango > AVL > GTFS"], "Ridango > AVL");
   assert.deepEqual([folder.folder, folder.cases, folder.of], ["Data Export (grid Export)", 2, 3]);
+});
+
+test("agent results: blocked requests and console errors are parsed from Playwright console logs", async () => {
+  const { parseBlockedRequests, parseConsoleErrors } = await import("../scripts/lib/agent-results.mjs");
+  const log = [
+    "[    4894ms] [WARNING] [read-only] blocked POST ./rest/filter-provider @ C:/run/ui/block-writes.js:6",
+    "[    5763ms] [WARNING] [read-only] blocked post ./rest/filter-provider @ C:/run/ui/block-writes.js:6",
+    "[    5765ms] [ERROR] [TMS Exception]: %o No user logged in! @ https://avl.example/main.min.js:0",
+    "[    5766ms] [ERROR] [TMS Exception]: %o No user logged in! @ https://avl.example/main.min.js:0",
+  ].join("\n");
+  assert.deepEqual(parseBlockedRequests(log), [{ request: "POST ./rest/filter-provider", count: 2 }]);
+  assert.deepEqual(parseConsoleErrors(log), [{ message: "[TMS Exception]: %o No user logged in!", count: 2 }]);
+  assert.deepEqual(parseBlockedRequests(""), []);
+});
+
+test("agent results: a review file flattens to one row per item with id, title and reasoning", async () => {
+  const { flattenReview } = await import("../scripts/lib/agent-results.mjs");
+  const rows = flattenReview({
+    drops: [{ id: "K-1:CODE-12", reasoning: "Other page" }],
+    inventory: [{ id: "UI-001", functionality: "Export menu entry", confidence: "HIGH" }],
+    note: "free text",
+  });
+  assert.equal(rows.length, 3);
+  assert.deepEqual(rows.map((r) => [r.section, r.id, r.title, r.reasoning]), [
+    ["drops", "K-1:CODE-12", "", "Other page"], ["inventory", "UI-001", "Export menu entry", ""], ["note", "", "free text", ""],
+  ]);
+  assert.match(rows[1].detail, /"confidence":"HIGH"/);
+});
+
+test("agent results: forwarded notes as text, list or JSON list string all become plain lines", async () => {
+  const { notesText } = await import("../scripts/lib/agent-results.mjs");
+  assert.equal(notesText("Check QA-T1"), "Check QA-T1");
+  assert.equal(notesText(["a", "b"]), "• a\n• b");
+  assert.equal(notesText('["a","b"]'), "• a\n• b");
+  assert.equal(notesText("[draft] not JSON"), "[draft] not JSON");
+  assert.equal(notesText(undefined), "");
+});
+
+const SAMPLE_CONTEXT = {
+  overview: "CSV/Excel export from every grid page.",
+  screens: [{ name: "Users grid", route: "#/admin/user/list", reachedFrom: "Admin > Users", elements: ["Tools menu > Export"], sources: ["UI-001"] }],
+  workflows: [{ name: "Export a filtered grid", steps: ["Apply a filter", "Tools > Export"], outcome: "Toast 'Export finished for: Users' with Download", sources: ["AVLN-2655 UC-12", "CODE-16"] }],
+  rules: [{ id: "R-01", kind: "permission", rule: "Export needs EXPORTS.VIEW", expected: "Export entry hidden without it", status: "needs-confirmation", sources: ["CODE-02"] }],
+  apis: [{ method: "POST", path: "/rest/exportjob/export/{n}", purpose: "Start an export job", sources: ["ExportService.java"] }],
+  uiTexts: [{ text: "Export finished for:", where: "toast", sources: ["AVLN-2655"] }],
+  testData: [{ need: "User without EXPORTS.VIEW", how: "Admin > Users, role without the permission" }],
+  existingCoverage: { folders: ["Data Export (grid Export)"], namingPattern: "AVL - Export XLSX - <page>", summary: "XLSX per page; no CSV." },
+  openQuestions: [{ question: "Must POST /download require EXPORTS.VIEW?", affects: ["R-01"], sources: ["CODE-02"] }],
+  knownIssues: [{ issue: "POST /download has no permission check", sources: ["CODE-02"] }],
+};
+
+test("module context: the context review schema accepts a full module context and rejects items without sources", async () => {
+  const { default: Ajv } = await import("ajv");
+  const fsm = await import("node:fs");
+  const validate = new Ajv({ allErrors: true }).compile(JSON.parse(fsm.readFileSync(new URL("../schema/review/context.schema.json", import.meta.url))));
+  assert.ok(validate({ moduleContext: SAMPLE_CONTEXT, overrides: [] }), JSON.stringify(validate.errors));
+  const bad = structuredClone(SAMPLE_CONTEXT);
+  bad.rules[0].sources = [];
+  assert.equal(validate({ moduleContext: bad }), false);
+});
+
+test("module context: renders a markdown brief and one workbook row per item", async () => {
+  const { renderModuleContext, moduleContextRows } = await import("../scripts/lib/module-context.mjs");
+  const md = renderModuleContext(SAMPLE_CONTEXT, { title: "Module context — grid export" });
+  assert.match(md, /^# Module context — grid export/);
+  assert.match(md, /\*\*R-01\*\* \[permission, needs-confirmation\] Export needs EXPORTS.VIEW/);
+  assert.match(md, /  1\. Apply a filter/);
+  assert.match(md, /"Export finished for:" — toast/);
+  const rows = moduleContextRows(SAMPLE_CONTEXT);
+  assert.equal(rows.length, 10);
+  assert.deepEqual(rows.map((r) => r.section), ["Overview", "Screen", "Workflow", "Rule (permission)", "API", "UI text", "Test data", "Existing coverage", "Open question", "Known issue"]);
+  assert.equal(renderModuleContext(null), "");
+  assert.deepEqual(moduleContextRows(null), []);
+});
+
+test("run outputs: shared run header and file index; coverage.json carries results, agents.json no review copies", async () => {
+  const { runHeader, runFiles, coverageJson, agentsJson, OUTPUT_VERSION } = await import("../scripts/lib/run-outputs.mjs");
+  const runDir = path.join(os.tmpdir(), "runs", "avl", "2026-10-19_agents-x_v001");
+  const run = runHeader({ runDir, profile: { name: "avl" }, state: { runAt: "t", scope: { kind: "module", value: "shared/x", moduleFilter: "shared/x", keywords: ["export"], jql: "q" }, codeCommits: ["abc"] } });
+  assert.deepEqual(run, { name: "2026-10-19_agents-x_v001", runAt: "t", profile: "avl", scope: { kind: "module", value: "shared/x", module: "shared/x", keywords: ["export"], jql: "q" }, zephyrExportedAt: null, codeCommits: ["abc"] });
+
+  const plain = runFiles({ runDir, workbookPath: path.join(runDir, "w.xlsx") });
+  assert.equal(plain.workbook, "w.xlsx");
+  assert.deepEqual([plain.agents, plain.moduleContext, plain.ui], [null, null, null]);
+  const outside = path.join(os.tmpdir(), "elsewhere.xlsx");
+  assert.equal(runFiles({ runDir, workbookPath: outside }).workbook, outside.split(path.sep).join("/"));
+  const files = runFiles({ runDir, workbookPath: path.join(runDir, "w.xlsx"), agentRun: true, hasContext: true, hasUi: true });
+  assert.deepEqual([files.agents, files.moduleContext, files.moduleContextBrief, files.ui], ["agents.json", "module-context.json", "module-context.md", "ui/"]);
+
+  const r = minimalRun().stories[0];
+  r.linkCheck.linkedKeys = ["QA-T1"];
+  r.orphans = [{ key: "QA-T9", reasoning: "other feature", extra: 1 }];
+  const ui = { inventory: [{ id: "UI-001" }], observations: [], scenarios: [], blockedRequests: [], consoleErrors: [], screenshots: ["ui/UI-001_a.png"] };
+  const cov = coverageJson({ run, files, counts: { gaps: 1 }, moduleContext: SAMPLE_CONTEXT, ui, stories: [r] });
+  assert.equal(cov.version, OUTPUT_VERSION);
+  assert.deepEqual(Object.keys(cov), ["version", "run", "files", "counts", "moduleContext", "testDesign", "ui", "stories"]);
+  assert.deepEqual(Object.keys(cov.stories[0]), ["key", "summary", "module", "testable", "dropped", "linkedCases", "scenarios", "verdicts", "gaps", "orphans"]);
+  assert.deepEqual([cov.stories[0].linkedCases, cov.stories[0].orphans], [["QA-T1"], [{ key: "QA-T9", reasoning: "other feature" }]]);
+  assert.equal(cov.ui.screenshots[0], "ui/UI-001_a.png");
+  assert.equal(coverageJson({ run, files, stories: [] }).ui, null);
+
+  const ag = agentsJson({ run, files, agents: [{ agent: "ui-explorer", review: { inventory: [] }, reviewFile: "review/ui.json" }, { agent: "reporter", review: null, reviewFile: null }] });
+  assert.deepEqual(ag.agents.map((a) => [a.agent, a.reviewWritten, "review" in a]), [["ui-explorer", true, false], ["reporter", false, false]]);
+});
+
+test("workbook rows for agent runs: UI screenshots link only when saved; reviews point to sheets instead of copying them", async () => {
+  const { uiEvidenceRows, agentReviewRows, SHEETS } = await import("../scripts/lib/workbook.mjs");
+  const rows = uiEvidenceRows({
+    inventory: [{ id: "UI-001", functionality: "Export", screenshot: "UI-001_a.png" }, { id: "UI-002", functionality: "Missing", screenshot: "UI-002_b.png" }],
+    observations: [], scenarios: [], blockedRequests: [], consoleErrors: [], screenshots: ["ui/UI-001_a.png", "ui/extra.png"],
+  });
+  assert.deepEqual(rows.map((r) => [r.kind, r.screenshot, r.screenshotUrl]), [
+    ["inventory", "ui/UI-001_a.png", "ui/UI-001_a.png"], ["inventory", "UI-002_b.png (file not saved)", null], ["screenshot", "ui/extra.png", "ui/extra.png"],
+  ]);
+  assert.deepEqual(uiEvidenceRows(null), []);
+
+  const rev = agentReviewRows([
+    { agent: "context-builder", review: { moduleContext: SAMPLE_CONTEXT, overrides: [{ expectedId: "K:S1", verdict: "Covered", reasoning: "steps match" }] } },
+    { agent: "ui-explorer", review: { inventory: [{ id: "UI-001" }, { id: "UI-002" }] } },
+    { agent: "reporter", review: null },
+  ]);
+  assert.deepEqual(rev.map((r) => [r.agent, r.section, r.title]), [
+    ["context-builder", "moduleContext", `1 item(s), shown in ${SHEETS.context}`], ["context-builder", "overrides", "Covered"],
+    ["ui-explorer", "inventory", `2 item(s), shown in ${SHEETS.ui}`],
+  ]);
+});
+
+test("collectScreenshots moves only images saved since the agent started into ui/", async () => {
+  const { collectScreenshots } = await import("../scripts/lib/agent-results.mjs");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cov-"));
+  const old = path.join(root, "old.png");
+  fs.writeFileSync(old, "x");
+  fs.utimesSync(old, new Date(2020, 0, 1), new Date(2020, 0, 1));
+  const since = Date.now() - 1000;
+  fs.writeFileSync(path.join(root, "UI-001_a.png"), "x");
+  fs.writeFileSync(path.join(root, "notes.txt"), "x");
+  const toDir = path.join(root, "run", "ui");
+  assert.deepEqual(collectScreenshots({ fromDir: root, toDir, since }), ["UI-001_a.png"]);
+  assert.ok(fs.existsSync(path.join(toDir, "UI-001_a.png")) && fs.existsSync(old) && fs.existsSync(path.join(root, "notes.txt")));
+});
+
+test("test design: suite is normalised, checked against the right cases, and uncovered cases become gaps", async () => {
+  const { needsDraft, designInput, normalizeSuite, checkCandidates, untracedScenarioGaps, designGap } = await import("../scripts/lib/test-design.mjs");
+  const row = (key, ids, matches, candidates = []) => ({
+    story: { key, summary: `${key} story` }, candidates,
+    expected: ids.map((id) => ({ id, title: `t ${id}`, source: "story" })), matches,
+  });
+  const m = (expectedId, verdict, matchedKeys = [], confidence = "High") => ({ expectedId, verdict, matchedKeys, confidence, missingAspects: "", reasoning: "r" });
+  const rows = [
+    row("A-1", ["A-1:S01", "A-1:S02", "A-1:S03"], [m("A-1:S01", "Covered", ["QA-T1"]), m("A-1:S02", "Missing"), m("A-1:S03", "Partial", ["QA-T9"])], [{ key: "QA-T1" }]),
+    row("A-2", ["A-2:S01"], [m("A-2:S01", "Missing")], [{ key: "QA-T9" }]),
+  ];
+
+  assert.deepEqual([needsDraft("Missing", "High"), needsDraft("Partial", "High"), needsDraft("Covered", "High"), needsDraft("Covered", "Medium"), needsDraft("Covered", "Low")], [true, true, false, false, true]);
+
+  const input = designInput({ moduleContext: { overview: "o", by: "context-builder" }, rows, maxContextChars: 1000 });
+  assert.equal(input.moduleContext.includes("context-builder"), false);
+  assert.deepEqual(input.scenarios.map((x) => [x.id, x.verdict]), [["A-1:S01", "Covered"], ["A-1:S02", "Missing"], ["A-1:S03", "Partial"], ["A-2:S01", "Missing"]]);
+
+  const { cases, notes } = normalizeSuite([
+    { tcId: "TC-01", title: "x", storyKey: "A-1", basis: ["R-01"], scenarioIds: ["A-1:S02", "NOPE"], whyNeeded: "R-01 says so" },
+    { tcId: "TC-01", title: "y", storyKey: "OTHER-9", basis: [], scenarioIds: ["A-2:S01"], whyNeeded: "" },
+    { tcId: "TC 03", title: "z", storyKey: "", basis: ["R-02"], scenarioIds: [], whyNeeded: "w" },
+  ], rows, "A-1");
+  assert.deepEqual(cases.map((c) => [c.tcId, c.storyKey, c.scenarioIds]), [["TC-01", "A-1", ["A-1:S02"]], ["TC-01-2", "A-2", ["A-2:S01"]], ["TC-03", "A-1", []]]);
+  assert.match(cases[1].whyNeeded, /A-2:S01/);
+  assert.equal(notes.length, 2);
+
+  // A-1's own candidates, plus QA-T9 (a candidate of A-2) because the traced scenario S03 matched it.
+  const pool = checkCandidates(rows[0], [{ scenarioIds: ["A-1:S03"] }], rows).map((c) => c.key);
+  assert.deepEqual(pool, ["QA-T1", "QA-T9"]);
+
+  // S03 (Partial) is traced by no designed case, so it stays a scenario gap; S01 is covered.
+  assert.deepEqual(untracedScenarioGaps(rows, cases).map((x) => x.match.expectedId), ["A-1:S03"]);
+
+  const g = designGap(cases[0], { verdict: "Partial", matchedKeys: ["QA-T9"], confidence: "High", missingAspects: "the file content", reasoning: "QA-T9 step 2 only queues the job" }, [{ id: "R-01", status: "needs-confirmation" }]);
+  assert.equal(g.gapId, "GAP-A-1-TC-01");
+  assert.equal(g.source, "context");
+  assert.equal(g.codeReview, "needs PO confirmation");
+  assert.match(g.reasoning, /^Should be covered: R-01 says so \(from R-01, A-1:S02\)\. Only partly covered by QA-T9: .* Missing: the file content$/);
+});
+
+test("buildWorkbook writes the designed suite and rejects designed cases without a check reasoning", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cov-"));
+  const tc = { tcId: "TC-01", storyKey: "AVLN-1", title: "Export selected rows", whyNeeded: "R-04 needs it", basis: ["R-04"], scenarioIds: ["AVLN-1:S01"], flow: "main", type: "positive", steps: ["Select", "Export"], expected: "Only selected rows", check: { verdict: "Missing", matchedKeys: [], confidence: "High", missingAspects: "", reasoning: "No case opens the file." }, gapId: "GAP-AVLN-1-TC-01" };
+  const out = await buildWorkbook({ file: path.join(dir, "a.xlsx"), ...minimalRun(), testDesign: { cases: [tc] } });
+  assert.ok(out.sheets.includes("8_Test_Design"));
+  const { default: ExcelJS } = await import("exceljs");
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(path.join(dir, "a.xlsx"));
+  const ws = wb.getWorksheet("8_Test_Design");
+  assert.deepEqual([ws.getCell(2, 1).value, ws.getCell(2, 11).value, ws.getCell(2, 16).value], ["TC-01", "Missing", "GAP-AVLN-1-TC-01"]);
+  await assert.rejects(buildWorkbook({ file: path.join(dir, "b.xlsx"), ...minimalRun(), testDesign: { cases: [{ ...tc, check: { ...tc.check, reasoning: "" } }] } }), /8_Test_Design: TC-01 has no reasoning/);
+});
+
+test("test design: a designed case keeps a settled scenario verdict instead of being judged again", async () => {
+  const { inheritedCheck } = await import("../scripts/lib/test-design.mjs");
+  const m = (expectedId, verdict, matchedKeys, autoAccepted, confidence = "High") => [expectedId, { expectedId, verdict, matchedKeys, autoAccepted, confidence, reasoning: "no case opens the file" }];
+  const matchById = new Map([m("A:S1", "Covered", ["QA-T1"], true), m("A:S2", "Covered", ["QA-T2"], true), m("A:S3", "Missing", [], false, "Medium"), m("A:S4", "Partial", ["QA-T3"], false), m("A:S5", "Covered", ["QA-T4"], false, "Medium"), m("B:S1", "Missing", [], false)]);
+  const storyOf = new Map([["A:S1", "A"], ["A:S2", "A"], ["A:S3", "A"], ["A:S4", "A"], ["A:S5", "A"], ["B:S1", "B"]]);
+  const tc = (scenarioIds) => ({ tcId: "TC-01", storyKey: "A", scenarioIds });
+  const covered = inheritedCheck(tc(["A:S1", "A:S2"]), matchById, storyOf);
+  assert.deepEqual([covered.verdict, covered.matchedKeys, covered.decidedBy], ["Covered", ["QA-T1", "QA-T2"], "scenario verdict"]);
+  const missing = inheritedCheck(tc(["A:S3"]), matchById, storyOf);
+  assert.deepEqual([missing.verdict, missing.confidence], ["Missing", "Medium"]);
+  // Not settled: no scenarios, a Partial, a Covered that was not auto-accepted, mixed verdicts, or another story's scenario.
+  for (const ids of [[], ["A:S4"], ["A:S5"], ["A:S1", "A:S3"], ["B:S1"], ["A:UNKNOWN"]]) assert.equal(inheritedCheck(tc(ids), matchById, storyOf), null, ids.join(","));
 });

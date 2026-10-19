@@ -37,7 +37,9 @@ Read `runs/<profile>/latest-summary.md`. Report:
 Give the workbook path. Report tokens only, never money.
 
 ## Reading the workbook
-- `6_Gaps` is the review list.
+- `8_Test_Design` is the test suite designed from the module context, each case with Covered / Partial / Missing
+  against the existing Zephyr cases and why it should be tested. Missing and Partial ones become gaps.
+- `9_Gaps` is the review list (`8_Gaps` or `6_Gaps` in older workbooks).
 - `Unverified` means a case probably covers the scenario, but with Low confidence.
 - `Code-only`, `UI only` and `needs PO confirmation` scenarios describe current behaviour; confirm the behaviour is
   intended before approving.

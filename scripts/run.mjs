@@ -95,7 +95,7 @@ Done. ${ctx.stories.length} stories (${ctx.testable().length} testable), ${c.exp
 Tokens used: ${tok.total.total_tokens.toLocaleString("en-US")} (pipeline ${tok.pipeline.total_tokens.toLocaleString("en-US")}, agents ${tok.agents.total_tokens.toLocaleString("en-US")}; ${tok.total.calls - tok.total.reused} new call(s), ${tok.total.reused} from cache)
 Workbook: ${result.workbookPath}
 Summary:  ${result.summaryPath}
-Review the 6_Gaps sheet (Review decision column), then: node scripts/run.mjs --create-approved "${result.workbookPath}"`);
+Review the 9_Gaps sheet (Review decision column), then: node scripts/run.mjs --create-approved "${result.workbookPath}"`);
 }
 
 try {

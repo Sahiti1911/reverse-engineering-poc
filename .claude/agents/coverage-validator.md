@@ -11,9 +11,13 @@ testers' review is free of duplicates and leaves no gap without a usable draft.
 1. The validate stage has already been run for you (do not run it). Its rule checks flag drafts whose name
    resembles an existing case (`possible-duplicate`) and gaps with no draft (`undrafted`).
 2. Review: `node scripts/inspect.mjs --run-dir <dir> --what validation`, and `--what gaps --key STORY` for
-   a story's full drafts.
+   a story's full drafts. `--what design` shows the designed suite: which designed cases were judged Covered
+   (and by which case), and which became gaps.
 3. For every `possible-duplicate`: read the named case's steps (`get_test_steps`). Also search once per story
    for a same-purpose case the name check could miss (`search_test_cases` with the scenario's key words).
+   Gaps with source `context` were already compared step by step with the story's candidate cases by the check
+   step (`--what design` shows the verdict and reasoning). Do not re-read those candidates; search only outside
+   them (other folders, other names), and spend the rest on draft quality.
    - Same behaviour and end state → `duplicate` with `duplicateOf`.
    - Overlaps, but the draft adds steps → `redesign` ("extend QA-Txxx instead").
    - Different behaviour → `ok`.

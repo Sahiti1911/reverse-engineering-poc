@@ -57,7 +57,7 @@ the stage tuning that used to be in `config/run.json` (models, batches, limits, 
 | explore | `ui-explorer` | Opens the module's screens with Playwright MCP: what a tester sees, whether expected scenarios show up | `ui.json` |
 | explore | `zephyr-explorer` | The right existing cases to compare with: finds never-linked cases, removes other features' cases | `zephyr.json` |
 | context | `context-builder` | Joins the four, verifies doubtful Covered / Partial / Missing verdicts by reading Zephyr steps | `context.json` |
-| design | `test-designer` | Drafts for Partial / Missing items only, following the conventions | `drafts.json` |
+| design | `test-designer` | The draft stage first designs the module's full test suite from the module context and checks each case against the existing Zephyr cases; the agent then fixes the drafts of the Missing / Partial ones, following the conventions | `drafts.json` |
 | validate | `coverage-validator` | No draft duplicates an existing case, no gap left without a usable draft; sends drafts back | `validation.json` |
 | report | `reporter` | Executive summary at the top of `summary.md` | — |
 
@@ -75,10 +75,12 @@ tools at all. `full` is refused unless the environment sets `allowWrites: true`.
 
 The output lands in `runs/<profile>/<date>_agents-<module>/`:
 - `summary.md`, also copied to `runs/<profile>/latest-summary.md`
-- the workbook and `coverage.json` (the same results as JSON)
+- the workbook and `coverage.json` (the same results as JSON), `agents.json`, `summary.json`,
+  `module-context.json` / `.md` (see [JSON files](#json-files))
 - `handoff/NN-<agent>.json`: what each agent found and forwarded
 - `review/<agent>.json`: the changes each agent made, merged by a later stage and labelled `agent:<name>`
-- `ui/`: screenshots and the read-only init script; `mcp.json`: the MCP servers of this run
+- `ui/`: screenshots (moved here after the UI explorer finishes; Playwright saves them in the working directory),
+  page snapshots, console logs and the read-only init script; `mcp.json`: the MCP servers of this run
 
 | Option | Effect |
 |---|---|
@@ -128,7 +130,7 @@ The words don't have to name a folder. A cross-cutting feature such as "grid dat
 - **Stories: Rovo.** JQL finds stories that contain a keyword. Rovo (Atlassian semantic search) also finds
   stories worded differently. Headless agents can't use claude.ai connectors, so `/coverage` runs up to 3 Rovo
   searches in your session first, writes `runs/<profile>/rovo/<module>.json` and passes it as
-  `--extra-stories`. Those stories show module source `rovo` in `1_Story_Triage` and the run log, and the
+  `--extra-stories`. Those stories show module source `rovo` in `2_Story_Triage` and the run log, and the
   scout keeps only the ones really about the feature. Add `--no-rovo` to `/coverage` to skip it.
 - **Cross-cutting features: `"crossCutting": true`** in modules.json. Pages have their own QA docs, and a
   page's doc may contain one export use case among ten others. With this flag, a story whose QA doc belongs to
@@ -184,6 +186,16 @@ The stages are `scope → requirements → code → zephyr → context → draft
 `node scripts/run.mjs --stage <stage> --run-dir <dir>`. That is how the agents drive the pipeline, and it lets
 you re-run a single step.
 
+The draft stage designs test cases from the module context, not gap by gap. One Claude call (`design`,
+`prompts/design.md`) writes the test suite the module should have: a case per workflow path and per rule,
+each saying why it is needed and which scenarios it realises. A designed case whose scenarios are already
+settled (all Covered with High confidence, or all Missing in its own story) keeps that verdict at 0 tokens, so
+no existing case is judged twice. Only the rest go to a second call per story (`check`, `prompts/check.md`),
+which compares them with the existing Zephyr cases, steps included: Covered, Partial (which case to extend)
+or Missing. Only Missing and Partial cases get a draft. A scenario gap that no
+designed case picked up is drafted from the scenario, so nothing is lost. Without a module context (a plain
+pipeline run) the stage drafts from the scenario gaps as before.
+
 The code stage reads a module's whole implementation, not only its screen. Starting from the module folder
 (plus the legacy folder of the same name and any `.md` docs kept there), it follows code references: the types
 the module uses, the classes named after the module that use those types, subclasses of the module's
@@ -203,7 +215,7 @@ unchanged work uses 0 tokens. Review decisions already in the workbook are kept.
 
 ## Review and create
 
-1. In the workbook's `6_Gaps` sheet, set **Review decision** (`Approve` / `Reject` / `Review`). It is
+1. In the workbook's `9_Gaps` sheet, set **Review decision** (`Approve` / `Reject` / `Review`). It is
    pre-filled with the suggestion. You can edit the draft in place; steps use `n. action [data: x] => expected`,
    one per line.
 2. `node scripts/run.mjs --create-approved <workbook.xlsx>` is a dry run. It warns about approvals nobody
@@ -214,18 +226,41 @@ unchanged work uses 0 tokens. Review decisions already in the workbook are kept.
 
 ## Workbook
 
+The sheets follow the analysis: what the feature is, what should be tested, what exists, the verdicts, the review
+list, then how the run went. Every sheet is always written; the agent-only ones (marked *) stay empty in a plain
+pipeline run, so the numbers never shift. The Summary starts with a linked index of the sheets and their row counts.
+
 | Sheet | Content |
 |---|---|
-| Summary | Agent-chain findings, coverage per module, **tokens by stage and by agent** (pipeline vs agents), tokens per story / scenario / gap, cache hit ratio |
-| 1_Story_Triage | Testable or not (rule / LLM / agent), module source, agent AC flags, reasoning |
-| 2_Link_Check | Zephyr cases already linked to each story or a related story |
-| 3_Expected_Scenarios | What should be tested (story / code), evidence, agent review (kept / dropped / needs confirmation / suspected bug) |
-| 4_Zephyr_Cases | Existing cases compared, and why |
-| 5_Matching | Covered / Partial / Missing with confidence; `decidedBy` shows agent overrides |
-| 6_Gaps | Drafts, validation result, suggested and review decision — **where you review** |
-| 7_Orphan_Zephyr | Linked cases that match no requirement |
-| 8_Run_Log | Every step, review merge, skip and error |
-| 9_Token_Usage | One row per Claude call and agent session: input, output, cache-read, cache-write and total tokens |
+| Summary | Sheet index, agent chain in pipeline order, coverage per module, **tokens by stage and by agent** (pipeline vs agents), tokens per story / scenario / gap, cache hit ratio |
+| 1_Module_Context* | Screens, workflows, rules, APIs, exact UI texts, test data, open questions and known issues, each with its sources (context-builder) |
+| 2_Story_Triage | Testable or not (rule / LLM / agent), module source, agent AC flags, reasoning |
+| 3_Link_Check | Zephyr cases already linked to each story or a related story |
+| 4_Expected_Scenarios | What should be tested (story / code / UI), evidence, agent review (kept / dropped / needs confirmation / suspected bug) |
+| 5_UI_Exploration* | UI inventory, checked scenarios, new scenarios, blocked requests, console errors; screenshots link to `ui/` |
+| 6_Zephyr_Cases | Existing cases compared, and why |
+| 7_Matching | Covered / Partial / Missing with confidence; `decidedBy` shows agent overrides |
+| 8_Test_Design* | The test suite the module should have, designed from the module context: why each case is needed (rule / workflow), Covered / Partial / Missing against the existing cases, and its gap id |
+| 9_Gaps | Drafts, validation result, suggested and review decision — **where you review** |
+| 10_Orphan_Zephyr | Linked cases that match no requirement |
+| 11_Agents* | One row per agent: status, tokens, findings, forwarded notes, review file, what a later stage applied |
+| 12_Agent_Reviews* | Every item of every review file with its reasoning; sections with their own sheet (module context, UI) get a pointer row |
+| 13_Run_Log | Every step, review merge, skip and error |
+| 14_Token_Usage | One row per Claude call and agent session: input, output, cache-read, cache-write and total tokens |
+
+`create-approved` and re-runs still read workbooks built before this order (review sheet `8_Gaps` or `6_Gaps`).
+
+## JSON files
+
+Each JSON file of a run starts with the same `version`, `run` header (name, time, profile, scope, Zephyr export,
+code commits) and `files` index (paths relative to the run folder; `null` when the run has no such output).
+
+| File | Content |
+|---|---|
+| `coverage.json` | The results, twin of the workbook: `counts`, `moduleContext`, `ui` evidence, and per story `linkedCases`, `scenarios`, `verdicts`, `gaps` (with drafts) and `orphans` |
+| `agents.json` | Agent runs: per agent status, tokens, findings, forwarded notes, `reviewFile` / `reviewWritten` and what was applied. The review itself stays in `review/` |
+| `summary.json` | Counts and tokens (total, pipeline, agents, by stage) |
+| `module-context.json` / `.md` | The module context alone, and its readable brief (what the test-designer works from) |
 
 ## Tokens
 

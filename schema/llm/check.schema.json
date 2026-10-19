@@ -1,0 +1,55 @@
+{
+  "type": "object",
+  "properties": {
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "tcId": {
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "Covered",
+              "Partial",
+              "Missing"
+            ]
+          },
+          "matchedKeys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confidence": {
+            "enum": [
+              "High",
+              "Medium",
+              "Low"
+            ]
+          },
+          "missingAspects": {
+            "type": "string"
+          },
+          "reasoning": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tcId",
+          "verdict",
+          "matchedKeys",
+          "confidence",
+          "missingAspects",
+          "reasoning"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "results"
+  ],
+  "additionalProperties": false
+}
