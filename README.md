@@ -17,7 +17,11 @@ node scripts/agents.mjs --module "conductor"       # override the configured mod
 npm run ui-login                                   # once per environment, before the UI explorer can log in
 ```
 
-In a Claude Code session, `/coverage import job` does the same thing.
+In a Claude Code session, `/coverage import job` does the same thing, and adds a Rovo search and a keyword check
+first (see [Using it with Claude Code](#using-it-with-claude-code)).
+
+Diagrams: [docs/architecture.html](docs/architecture.html) (the whole POC) and
+[docs/test-design.html](docs/test-design.html) (how the draft stage designs test cases from the module context).
 
 ### The pipeline is configured in `config/config.yaml`
 
@@ -29,7 +33,7 @@ environments:
     login: { method: storage-state, storageState: cache/avl/ui/test.storage.json }
     allowWrites: false                  # full UI mode is refused unless true
 scope:
-  statusCategories: [Done]              # only Done stories ([] = all; issues:K1,K2 and includeStories always count)
+  statusCategories: []                  # [] = stories in any status; [Done] = Done only (issues:K1,K2 and includeStories always count)
   baseline: none                        # last-run = only stories updated since the previous run of this scope
 pipeline:                               # phases in order; agents of one phase run in parallel
   - { phase: scope,    agents: [module-scout] }
@@ -56,7 +60,7 @@ the stage tuning that used to be in `config/run.json` (models, batches, limits, 
 | explore | `code-analyst` | Code-derived edge cases: keep / drop / needs PO confirmation, **suspected bugs** | `code.json` |
 | explore | `ui-explorer` | Opens the module's screens with Playwright MCP: what a tester sees, whether expected scenarios show up | `ui.json` |
 | explore | `zephyr-explorer` | The right existing cases to compare with: finds never-linked cases, removes other features' cases | `zephyr.json` |
-| context | `context-builder` | Joins the four, verifies doubtful Covered / Partial / Missing verdicts by reading Zephyr steps | `context.json` |
+| context | `context-builder` | Joins the four into the **module context** (screens, workflows, rules, APIs, exact UI texts, test data, open questions) that test cases are designed from, and verifies doubtful Covered / Partial / Missing verdicts by reading Zephyr steps | `context.json` |
 | design | `test-designer` | The draft stage first designs the module's full test suite from the module context and checks each case against the existing Zephyr cases; the agent then fixes the drafts of the Missing / Partial ones, following the conventions | `drafts.json` |
 | validate | `coverage-validator` | No draft duplicates an existing case, no gap left without a usable draft; sends drafts back | `validation.json` |
 | report | `reporter` | Executive summary at the top of `summary.md` | — |
@@ -71,9 +75,12 @@ Playwright tools of its mode. A failing optional explorer (code, UI, Zephyr) is 
 profile, and in `read-only` mode an init script blocks every POST/PUT/PATCH/DELETE the page sends (fetch, XHR,
 form posts, beacons); `allowedWriteUrls` lets through searches sent as POST. `observe` mode has no click or type
 tools at all. `full` is refused unless the environment sets `allowWrites: true`. The saved login lives in
-`cache/<profile>/ui/` (git-ignored) and agents may not read it.
+`cache/<profile>/ui/` (git-ignored) and agents may not read it. Before each run the orchestrator checks the saved
+login; when it has expired and the environment has `login.credentials`, it logs in again by script (0 tokens).
+The username and password are read from `.env` into memory only, never passed to an agent.
 
-The output lands in `runs/<profile>/<date>_agents-<module>/`:
+Every run gets its own folder, `runs/<profile>/<date>_agents-<module>_vNNN/`, so earlier runs stay as they were
+(`version.json` says how the run was started and what it resumed from):
 - `summary.md`, also copied to `runs/<profile>/latest-summary.md`
 - the workbook and `coverage.json` (the same results as JSON), `agents.json`, `summary.json`,
   `module-context.json` / `.md` (see [JSON files](#json-files))
@@ -88,9 +95,9 @@ The output lands in `runs/<profile>/<date>_agents-<module>/`:
 | `--keywords "a,b"` | Suggest related words to the scout |
 | `--extra-stories <file|K1,K2>` | Candidate stories found elsewhere (Rovo), JSON `[{key, summary, query}]`. Fetched only if they are stories of the project, marked `rovo`, confirmed or dropped by the scout |
 | `--limit n` | First n stories (trial) |
-| `--from <agent>` | Resume the latest run of this module from that agent's phase (earlier handoffs are reused) |
+| `--from <agent>` | Resume from that agent's phase: the latest run of this module is copied into a new version folder and the earlier handoffs are reused |
 | `--until <agent>` | Stop after that agent's phase |
-| `--skip <agent,…>` | Run that stage without its agent review, which saves the agent's tokens (not `module-scout`) |
+| `--skip <agent,…>` | Run that stage without its agent review, which saves the agent's tokens (not `module-scout`). An agent that ran before keeps its earlier handoff and review |
 | `--run-dir <dir>` | Use a specific run folder |
 
 To find module names: `node scripts/modules.mjs --find "<words>"`.
@@ -271,11 +278,72 @@ Only token counts are reported, never money. Measured on AVL (2026-10-17):
 | AVLN-2398 alone (17 UC + 15 code scenarios) | ~63k | — |
 | 12 mixed stories, plain pipeline | ~290k (~36k per testable story) | — |
 | Module `admin/conductor` (15 stories found, 2 relevant) | ~76k | ~483k (scout 81k, requirements 90k, code 119k, matcher 59k, designer 99k, reporter 35k) |
+| Cross-cutting `grid export` (2026-10-19; 10 stories, 6 testable, UI explorer on, design + check) | ~437k | ~1.62M (UI explorer 503k, validator 323k, test-designer 174k, zephyr 142k, code 122k, context 122k) |
 
 Most agent tokens are cache reads of the agent's own context. The levers are all in `config/config.yaml`:
 the model per stage, the model per agent (`agents.model`), batch sizes, byte caps, and the run budget
 `claude.maxTokensPerRun`. When the budget is reached, Claude calls stop and the workbook is still written.
 Use `--skip <agent>` to trade agent review for tokens.
+
+## Using it with Claude Code
+
+The repo is set up for [Claude Code](https://claude.com/claude-code) (CLI or the VS Code extension). Open the repo
+folder in it, and the command, skill, agents and MCP servers below load from `.claude/` and `.mcp.json`.
+
+**Before the first run**
+1. Do the [Setup](#setup) below (Node, `npm install`, `.env`).
+2. Approve the project MCP server `zephyr` (`zephyr_mcp/`) when Claude Code asks. Playwright is started per run
+   by `agents.mjs`, so you don't need to install it yourself.
+3. Optional: connect the **Atlassian (Rovo)** connector in your claude.ai settings for the Rovo story search. Without
+   it, or when the site has no Rovo, `/coverage` says so in one line and goes on.
+4. `npm run ui-login` once per environment, if the UI explorer should run.
+
+**Run an analysis: `/coverage <module or feature>`**
+
+```text
+/coverage import job
+/coverage grid data export
+/coverage conductor --env test --limit 5
+/coverage grid export --from test-designer        # resume: reuse the scout, explorers and context
+/coverage grid export --skip ui-explorer           # no browser this time
+/coverage csv export --rediscover                  # re-check the keywords of a configured module
+/coverage import job --no-rovo                     # skip the Rovo search
+```
+
+What it does, in order:
+1. **Rovo search** (up to 3 queries, in your session, because headless agents can't use claude.ai connectors).
+   The found stories and Confluence docs go to `runs/<profile>/rovo/<module>.json`.
+2. **Keywords and module**, only for a module not in `modules.json` (or with `--rediscover`): it shows the ranked
+   keyword table and a proposed modules.json entry, then asks you to save it as proposed, save it with changes, or
+   stop. Nothing is saved without your answer.
+3. **The agent pipeline** (`node scripts/agents.mjs`, up to an hour). If the scout finds the name ambiguous, it
+   asks you which module you mean.
+4. **The results**: the executive summary, the results table, suspected bugs, tokens per agent, the Rovo docs
+   and the workbook path.
+
+**Ask in plain words.** The `coverage-gap-analysis` skill picks up requests such as "find the missing test cases
+for the conductor module", "run the plain pipeline for AVLN-2398", "explain why TC-11 is Partial" or "add a
+profile for project X". You can also ask about a finished run ("which gaps need a PO answer?"). Claude reads
+the run with `node scripts/inspect.mjs --run-dir <dir> --what <stories|scenarios|context|design|gaps|…>`
+instead of opening the whole workbook.
+
+**Create the approved cases.** Review `9_Gaps` in the workbook, then ask Claude to create the approved ones. It
+runs the `--create-approved` dry run first and shows what would be created. It only adds `--yes` after you
+confirm that batch.
+
+**What Claude will not do** (from [CLAUDE.md](CLAUDE.md)):
+- create, update or link Zephyr cases without your confirmation for that batch (Zephyr has no delete);
+- post Jira comments or change Jira issues during an analysis;
+- edit the reference clones under `cache/<profile>/repos/`;
+- print or copy secrets from `.env`, or let agents read the saved UI login.
+
+| Claude Code piece | Where |
+|---|---|
+| `/coverage` command | [.claude/commands/coverage.md](.claude/commands/coverage.md) |
+| `coverage-gap-analysis` skill | [.claude/skills/coverage-gap-analysis/SKILL.md](.claude/skills/coverage-gap-analysis/SKILL.md) |
+| The nine agents (run headless by `agents.mjs`) | [.claude/agents/](.claude/agents/) |
+| Project rules Claude follows | [CLAUDE.md](CLAUDE.md) |
+| Zephyr MCP server | [.mcp.json](.mcp.json), [zephyr_mcp/](zephyr_mcp/) |
 
 ## Add a project
 
@@ -295,10 +363,12 @@ Zephyr details plus `conventions.md`, and validate with `--dry-run`. No code cha
 |---|---|
 | [config/config.yaml](config/config.yaml) | Pipeline, environments, scope filters, agent options, stage tuning |
 | [scripts/agents.mjs](scripts/agents.mjs), [scripts/lib/pipeline.mjs](scripts/lib/pipeline.mjs) | Agent pipeline orchestrator; agent registry, pipeline validation, UI safety |
-| [scripts/ui-login.mjs](scripts/ui-login.mjs) | Saves a logged-in browser session for the UI explorer |
+| [scripts/ui-login.mjs](scripts/ui-login.mjs), [scripts/lib/ui-session.mjs](scripts/lib/ui-session.mjs) | Saves and checks the logged-in browser session for the UI explorer; scripted re-login |
 | [scripts/run.mjs](scripts/run.mjs) | Pipeline (all stages or one) and `--create-approved` |
 | [scripts/lib/stages.mjs](scripts/lib/stages.mjs) | The eight stages |
 | [scripts/lib/reviews.mjs](scripts/lib/reviews.mjs) | Merging agent review files |
+| [scripts/lib/test-design.mjs](scripts/lib/test-design.mjs), [scripts/lib/module-context.mjs](scripts/lib/module-context.mjs) | Design and check helpers of the draft stage; module context brief and sheet rows |
+| [scripts/lib/workbook.mjs](scripts/lib/workbook.mjs), [scripts/lib/report.mjs](scripts/lib/report.mjs), [scripts/lib/run-outputs.mjs](scripts/lib/run-outputs.mjs), [scripts/lib/agent-results.mjs](scripts/lib/agent-results.mjs) | Workbook, `summary.md`, the run's JSON files, agent results and UI evidence |
 | [scripts/inspect.mjs](scripts/inspect.mjs), [scripts/modules.mjs](scripts/modules.mjs) | Compact state viewer, module finder |
 | [prompts/](prompts/), [schema/](schema/) | Stage prompts, output / review / handoff schemas (`node scripts/gen-llm-schemas.mjs`) |
 | [zephyr_mcp/](zephyr_mcp/) | Local Zephyr MCP server (registered in `.mcp.json`) |
