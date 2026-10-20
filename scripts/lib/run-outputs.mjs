@@ -7,6 +7,7 @@
 //   summary.json         the numbers: counts and tokens
 //   module-context.json  the module context alone; module-context.md is its readable brief
 import path from "node:path";
+import { fieldsForSheet, pickExtras } from "./output.mjs";
 
 export const OUTPUT_VERSION = 2;
 
@@ -26,9 +27,9 @@ export function runHeader({ runDir, state, profile }) {
 }
 
 /** Index of the run's output files; an entry is null when this run has no such output. */
-export function runFiles({ runDir, workbookPath, agentRun = false, hasContext = false, hasUi = false }) {
+export function runFiles({ runDir, workbookPath, gapsPath = null, agentRun = false, hasContext = false, hasUi = false }) {
   return {
-    workbook: rel(runDir, workbookPath),
+    workbook: rel(runDir, workbookPath), gapsWorkbook: gapsPath ? rel(runDir, gapsPath) : null,
     summary: "summary.md", summaryJson: "summary.json", coverage: "coverage.json",
     agents: agentRun ? "agents.json" : null,
     moduleContext: hasContext ? "module-context.json" : null, moduleContextBrief: hasContext ? "module-context.md" : null,
@@ -38,11 +39,15 @@ export function runFiles({ runDir, workbookPath, agentRun = false, hasContext = 
 }
 
 /** coverage.json from the run state's story records (ordered as in the workbook). */
-export function coverageJson({ run, files, counts = null, moduleContext = null, testDesign = null, ui = null, stories }) {
+export function coverageJson({ run, files, counts = null, fields = [], moduleContext = null, testDesign = null, ui = null, gapReport = null, stories }) {
+  // config output.fields: extra scenario and verdict fields; drafts and designed cases carry theirs already.
+  const scenarioExtras = fieldsForSheet(fields, "expected");
+  const verdictExtras = fieldsForSheet(fields, "matching");
   return {
     version: OUTPUT_VERSION, run, files, counts,
     moduleContext,
     testDesign,
+    gapReport,
     ui: ui && {
       inventory: ui.inventory, observations: ui.observations, scenarios: ui.scenarios,
       blockedRequests: ui.blockedRequests, consoleErrors: ui.consoleErrors, screenshots: ui.screenshots,
@@ -50,8 +55,8 @@ export function coverageJson({ run, files, counts = null, moduleContext = null, 
     stories: stories.map((r) => ({
       key: r.story.key, summary: r.story.summary, module: r.story.module, testable: r.triage.testable, dropped: r.dropped ?? null,
       linkedCases: r.linkCheck?.linkedKeys ?? [],
-      scenarios: (r.expected ?? []).map(({ id, source, flow, type, title, steps, expected, evidence, uiCheck, codeReview, suspectedBug, reasoning }) => ({ id, source, flow, type, title, steps, expected, evidence, uiCheck, codeReview, suspectedBug, reasoning })),
-      verdicts: (r.matches ?? []).map(({ expectedId, verdict, confidence, matchedKeys, missingAspects, decidedBy, reasoning }) => ({ expectedId, verdict, confidence, matchedKeys, missingAspects, decidedBy, reasoning })),
+      scenarios: (r.expected ?? []).map(({ id, source, flow, type, title, steps, expected, evidence, uiCheck, codeReview, suspectedBug, reasoning, ...rest }) => ({ id, source, flow, type, title, steps, expected, evidence, uiCheck, codeReview, suspectedBug, reasoning, ...pickExtras(rest, scenarioExtras) })),
+      verdicts: (r.matches ?? []).map(({ expectedId, verdict, confidence, matchedKeys, missingAspects, decidedBy, reasoning, ...rest }) => ({ expectedId, verdict, confidence, matchedKeys, missingAspects, decidedBy, reasoning, ...pickExtras(rest, verdictExtras) })),
       gaps: (r.gaps ?? []).map(({ gapId, expectedId, verdict, source, draft, validation, reviewDecision, createdKey, reasoning }) => ({ gapId, expectedId, verdict, source, draft, validation, reviewDecision, createdKey, reasoning })),
       orphans: (r.orphans ?? []).map(({ key, reasoning }) => ({ key, reasoning })),
     })),

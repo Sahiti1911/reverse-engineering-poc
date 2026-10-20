@@ -31,7 +31,7 @@ const PHASE_STAGES = {
   context: [{ stage: "context" }],
   design: [{ stage: "draft" }],
   validate: [{ stage: "validate" }],
-  report: [{ stage: "report" }],
+  report: [{ stage: "gap-review" }, { stage: "report" }],
 };
 
 /** Explorers whose failure does not stop the run (when agents.continueWhenExplorerFails is true). */

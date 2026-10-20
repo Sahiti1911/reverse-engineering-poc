@@ -2,6 +2,8 @@ import ExcelJS from "exceljs";
 import { summarizeTokens, totalTokens } from "./tokens.mjs";
 import { flattenReview } from "./agent-results.mjs";
 import { moduleContextRows } from "./module-context.mjs";
+import { loadLlmSchema } from "./config.mjs";
+import { outputFields, fieldsForSheet, extraCells, extraColumns } from "./output.mjs";
 
 export const REVIEW_OPTIONS = ["Approve", "Reject", "Review"];
 
@@ -28,7 +30,7 @@ export function parseSteps(text) {
     });
 }
 
-const HEADER_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F3864" } };
+export const HEADER_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F3864" } };
 const VERDICT_FILL = {
   Covered: "FFC6EFCE", Partial: "FFFFEB9C", Missing: "FFFFC7CE",
   Approve: "FFC6EFCE", Review: "FFFFEB9C", Reject: "FFD9D9D9",
@@ -89,6 +91,191 @@ const SHEET_INFO = {
 };
 const AGENT_ONLY = new Set(["context", "ui", "design", "agents", "reviews"]);
 
+/** Columns of every detail sheet, by SHEETS key. `key` is the row field, `header` the text in row 1. */
+export const COLUMNS = {
+  context: [
+    { header: "Section", key: "section", width: 20 }, { header: "ID", key: "id", width: 8 }, { header: "Item", key: "item", width: 50, wrap: true },
+    { header: "Detail / expected", key: "detail", width: 70, wrap: true }, { header: "Status", key: "status", width: 18 },
+    { header: "Sources", key: "sources", width: 40, wrap: true },
+  ],
+  triage: [
+    { header: "Key", key: "key", width: 13, link: "url" }, { header: "Summary", key: "summary", width: 50, wrap: true },
+    { header: "Epic", key: "epic", width: 30, wrap: true }, { header: "Module", key: "module", width: 22 },
+    { header: "Module source", key: "moduleSource", width: 22, wrap: true }, { header: "Status", key: "status", width: 13 },
+    { header: "Labels", key: "labels", width: 14 }, { header: "Created", key: "created", width: 11 }, { header: "Updated", key: "updated", width: 11 },
+    { header: "AC source", key: "acSource", width: 12 }, { header: "Testable", key: "testable", width: 10 },
+    { header: "Decided by", key: "decidedBy", width: 24 }, { header: "Agent flags (AC quality)", key: "flags", width: 35, wrap: true },
+    { header: "Reasoning", key: "reasoning", width: 70, wrap: true },
+  ],
+  links: [
+    { header: "Key", key: "key", width: 13, link: "url" }, { header: "Module", key: "module", width: 22 },
+    { header: "Related stories followed", key: "related", width: 26, wrap: true }, { header: "Linked Zephyr cases", key: "linked", width: 40, wrap: true },
+    { header: "# linked", key: "count", width: 9 }, { header: "Result", key: "result", width: 30 }, { header: "Reasoning", key: "reasoning", width: 70, wrap: true },
+  ],
+  expected: [
+    { header: "ID", key: "id", width: 28 }, { header: "Story", key: "story", width: 13, link: "storyUrl" }, { header: "Module", key: "module", width: 20 },
+    { header: "Source", key: "source", width: 10 }, { header: "UC / flow", key: "uc", width: 14 }, { header: "Scenario", key: "scenario", width: 45, wrap: true },
+    { header: "Type", key: "type", width: 12 }, { header: "Priority hint", key: "priorityHint", width: 10 }, { header: "Steps", key: "steps", width: 50, wrap: true },
+    { header: "Expected", key: "expected", width: 40, wrap: true }, { header: "Evidence", key: "evidence", width: 45, wrap: true, link: "evidenceUrl" },
+    { header: "Code / UI only?", key: "codeOnly", width: 16 }, { header: "Agent review", key: "agentReview", width: 26, wrap: true },
+    { header: "Derivation reasoning", key: "reasoning", width: 70, wrap: true },
+  ],
+  ui: [
+    { header: "Kind", key: "kind", width: 15 }, { header: "ID", key: "id", width: 16 }, { header: "Screen", key: "screen", width: 24, wrap: true },
+    { header: "URL", key: "url", width: 30, wrap: true }, { header: "Functionality / item", key: "what", width: 45, wrap: true },
+    { header: "Action", key: "action", width: 40, wrap: true }, { header: "Observed result", key: "result", width: 40, wrap: true },
+    { header: "Element (role / name / text)", key: "element", width: 35, wrap: true }, { header: "Confidence", key: "confidence", width: 11 },
+    { header: "Screenshot", key: "screenshot", width: 30, link: "screenshotUrl" }, { header: "Reasoning / uncertainty", key: "reasoning", width: 60, wrap: true },
+  ],
+  cases: [
+    { header: "Key", key: "key", width: 12, link: "url" }, { header: "Name", key: "name", width: 50, wrap: true }, { header: "Folder", key: "folder", width: 40, wrap: true },
+    { header: "Labels", key: "labels", width: 20 }, { header: "Status", key: "status", width: 11 }, { header: "Priority", key: "priority", width: 9 },
+    { header: "Automation", key: "automation", width: 13 }, { header: "Linked issue ids", key: "linkedTo", width: 14 }, { header: "Compared for stories", key: "forStories", width: 18 },
+    { header: "Objective / BDD (normalized)", key: "normalized", width: 60, wrap: true }, { header: "Reasoning", key: "reasoning", width: 45, wrap: true },
+  ],
+  matching: [
+    { header: "Expected ID", key: "id", width: 28 }, { header: "Story", key: "story", width: 13, link: "storyUrl" }, { header: "Module", key: "module", width: 18 },
+    { header: "Scenario", key: "scenario", width: 45, wrap: true }, { header: "Matched case(s)", key: "matched", width: 22, wrap: true },
+    { header: "Verdict", key: "verdict", width: 10, color: true }, { header: "Confidence", key: "confidence", width: 11 }, { header: "Auto-accepted", key: "autoAccepted", width: 12 },
+    { header: "Decided by", key: "decidedBy", width: 12 }, { header: "Scope", key: "scope", width: 18 },
+    { header: "Missing aspects", key: "missing", width: 40, wrap: true }, { header: "Match reasoning", key: "reasoning", width: 70, wrap: true },
+  ],
+  design: [
+    { header: "TC ID", key: "tcId", width: 9 }, { header: "Story", key: "story", width: 13, link: "storyUrl" }, { header: "Designed case", key: "title", width: 45, wrap: true },
+    { header: "Should be tested because", key: "whyNeeded", width: 55, wrap: true }, { header: "Basis (rules / workflows)", key: "basis", width: 22, wrap: true },
+    { header: "Scenarios", key: "scenarios", width: 24, wrap: true }, { header: "Flow", key: "flow", width: 9 }, { header: "Type", key: "type", width: 11 },
+    { header: "Steps", key: "steps", width: 50, wrap: true }, { header: "Expected", key: "expected", width: 40, wrap: true },
+    { header: "Verdict", key: "verdict", width: 10, color: true }, { header: "Covered by", key: "matched", width: 16, wrap: true }, { header: "Confidence", key: "confidence", width: 11 },
+    { header: "Missing aspects", key: "missing", width: 40, wrap: true }, { header: "Check reasoning", key: "reasoning", width: 60, wrap: true },
+    { header: "Gap ID", key: "gapId", width: 22 },
+  ],
+  gaps: [
+    { header: "Gap ID", key: "gapId", width: 20 }, { header: "Story", key: "story", width: 13, link: "storyUrl" }, { header: "Module", key: "module", width: 18 },
+    { header: "Scenario", key: "scenario", width: 40, wrap: true }, { header: "Source", key: "source", width: 9 }, { header: "Type", key: "type", width: 11 },
+    { header: "Verdict", key: "verdict", width: 10, color: true }, { header: "Partially covered by", key: "matched", width: 14 },
+    { header: "Why it is a gap", key: "gapReasoning", width: 50, wrap: true }, { header: "Agent review", key: "agentReview", width: 24, wrap: true },
+    { header: "Validation", key: "validation", width: 40, wrap: true },
+    { header: "Suggested decision", key: "suggested", width: 11, color: true }, { header: "Decision reasoning", key: "decisionReasoning", width: 50, wrap: true },
+    { header: "Review decision", key: "decision", width: 11, color: true }, { header: "Reviewer notes", key: "notes", width: 30, wrap: true },
+    { header: "Action", key: "action", width: 8 }, { header: "Extend key", key: "extendKey", width: 12 },
+    { header: "Draft name", key: "name", width: 45, wrap: true }, { header: "Objective", key: "objective", width: 45, wrap: true },
+    { header: "Precondition", key: "precondition", width: 35, wrap: true },
+    { header: "Steps (n. action [data: x] => expected)", key: "steps", width: 70, wrap: true },
+    { header: "BDD", key: "bdd", width: 40, wrap: true }, { header: "Labels", key: "labels", width: 20 },
+    { header: "Priority", key: "priority", width: 9 }, { header: "Priority reasoning", key: "priorityReasoning", width: 40, wrap: true },
+    { header: "Folder id", key: "folderId", width: 10 }, { header: "Folder path", key: "folderPath", width: 40, wrap: true }, { header: "Folder reasoning", key: "folderReasoning", width: 40, wrap: true },
+    { header: "Created key", key: "createdKey", width: 12, link: "createdUrl" }, { header: "Story issue id", key: "storyId", width: 10, hidden: true },
+    { header: "Expected ID", key: "expectedId", width: 10, hidden: true },
+  ],
+  orphans: [
+    { header: "Key", key: "key", width: 12, link: "url" }, { header: "Linked story", key: "story", width: 13 }, { header: "Name", key: "name", width: 50, wrap: true },
+    { header: "Folder", key: "folder", width: 40, wrap: true }, { header: "Reasoning", key: "reasoning", width: 70, wrap: true },
+  ],
+  agents: [
+    { header: "Agent", key: "agent", width: 20 }, { header: "Phase", key: "phase", width: 10 }, { header: "Status", key: "status", width: 10 },
+    { header: "Model", key: "model", width: 10 }, { header: "Tokens", key: "tokens", width: 11 }, { header: "Duration s", key: "duration", width: 10 },
+    { header: "Result from", key: "reusedFrom", width: 22 }, { header: "Findings", key: "findings", width: 90, wrap: true },
+    { header: "Forwarded notes", key: "forwardNotes", width: 50, wrap: true }, { header: "Review file", key: "reviewFile", width: 22 },
+    { header: "Applied by a later stage", key: "applied", width: 40, wrap: true },
+  ],
+  reviews: [
+    { header: "Agent", key: "agent", width: 20 }, { header: "Section", key: "section", width: 16 }, { header: "ID", key: "id", width: 28 },
+    { header: "Title / decision", key: "title", width: 45, wrap: true }, { header: "Reasoning", key: "reasoning", width: 60, wrap: true },
+    { header: "Full item (JSON)", key: "detail", width: 80, wrap: true },
+  ],
+  runLog: [
+    { header: "Step", key: "step", width: 22 }, { header: "Module / batch", key: "batch", width: 24 }, { header: "Time", key: "at", width: 20 },
+    { header: "In", key: "countIn", width: 8 }, { header: "Out", key: "countOut", width: 8 }, { header: "Details / assumptions", key: "notes", width: 80, wrap: true },
+    { header: "Skipped + why", key: "skipped", width: 50, wrap: true }, { header: "Errors", key: "errors", width: 50, wrap: true },
+  ],
+  tokens: [
+    { header: "Time", key: "at", width: 20 }, { header: "Stage", key: "stage", width: 12 }, { header: "Module", key: "module", width: 20 },
+    { header: "Jira keys", key: "keys", width: 24, wrap: true }, { header: "Model", key: "model", width: 18 }, { header: "Reused (cache)", key: "reused", width: 9 },
+    { header: "Failed", key: "failed", width: 8 }, { header: "Input", key: "input_tokens", width: 9 }, { header: "Output", key: "output_tokens", width: 9 },
+    { header: "Cache read", key: "cache_read_tokens", width: 10 }, { header: "Cache write", key: "cache_creation_tokens", width: 10 }, { header: "Total", key: "total", width: 10 },
+    { header: "Duration ms", key: "duration_ms", width: 11 }, { header: "Turns", key: "num_turns", width: 7 },
+    { header: "Prompt bytes", key: "input_bytes", width: 11 }, { header: "Items in", key: "items_in", width: 8 }, { header: "Items out", key: "items_out", width: 8 },
+    { header: "Error", key: "error", width: 40, wrap: true },
+  ],
+};
+
+/**
+ * Columns config cannot remove: the reasoning of decision rows, the IDs, and in 9_Gaps everything create-approved and
+ * re-runs read back by header (those cannot be renamed either). 9_Gaps itself cannot be switched off.
+ */
+const LOCKED = {
+  triage: ["key", "testable", "reasoning"], links: ["key", "reasoning"], expected: ["id", "reasoning"], cases: ["key", "reasoning"],
+  matching: ["id", "verdict", "reasoning"], design: ["tcId", "whyNeeded", "verdict", "reasoning"], orphans: ["key", "reasoning"],
+  reviews: ["agent", "reasoning"],
+  gaps: ["gapId", "story", "storyId", "expectedId", "gapReasoning", "suggested", "decisionReasoning", "decision", "notes", "action", "extendKey",
+    "name", "objective", "precondition", "steps", "bdd", "labels", "priority", "folderId", "createdKey"],
+};
+const NO_RENAME = new Set(["gaps"]);
+
+/** SHEETS key for a sheet named in config: "7_Matching", "Matching" or "matching". */
+export function sheetKey(name) {
+  const n = String(name).toLowerCase().replace(/^\d+_/, "").replace(/[\s_-]/g, "");
+  return Object.keys(SHEETS).find((k) => k.toLowerCase() === n || SHEETS[k].toLowerCase().replace(/^\d+_/, "").replace(/[\s_-]/g, "") === n) ?? null;
+}
+
+/**
+ * Apply `output.workbook.sheets.<sheet>` to a sheet's columns. `false` drops the sheet (null); `columns` keeps those
+ * columns in that order (locked ones not listed are added at the end); `hide` drops columns; `rename` maps old → new
+ * header. Columns are named by header text or row key. Throws on anything that cannot be applied.
+ */
+export function layoutColumns(key, columns, sheetCfg) {
+  const name = SHEETS[key];
+  if (sheetCfg === undefined || sheetCfg === null || sheetCfg === true) return columns;
+  if (sheetCfg === false) {
+    if (key === "gaps") throw new Error(`config output.workbook: ${name} cannot be switched off (it is where you review and approve drafts)`);
+    return null;
+  }
+  if (typeof sheetCfg !== "object") throw new Error(`config output.workbook.sheets.${name} must be false or an object with columns / hide / rename`);
+  const unknown = Object.keys(sheetCfg).filter((k) => !["columns", "hide", "rename"].includes(k));
+  if (unknown.length) throw new Error(`config output.workbook.sheets.${name}: unknown option(s) ${unknown.join(", ")} (use columns, hide, rename)`);
+  if (sheetCfg.columns && sheetCfg.hide) throw new Error(`config output.workbook.sheets.${name}: use columns or hide, not both`);
+  const norm = (s) => String(s).trim().toLowerCase();
+  const find = (ref) => {
+    const c = columns.find((x) => norm(x.key) === norm(ref) || norm(x.header) === norm(ref));
+    if (!c) throw new Error(`config output.workbook.sheets.${name}: no column "${ref}". Columns: ${columns.map((x) => x.header).join(", ")}`);
+    return c;
+  };
+  const locked = new Set(LOCKED[key] ?? []);
+  let out = columns;
+  if (sheetCfg.columns) {
+    const picked = [...new Set(sheetCfg.columns.map(find))];
+    out = [...picked, ...columns.filter((c) => locked.has(c.key) && !picked.includes(c))];
+  } else if (sheetCfg.hide) {
+    const hidden = new Set(sheetCfg.hide.map(find));
+    for (const c of hidden) if (locked.has(c.key)) throw new Error(`config output.workbook.sheets.${name}: "${c.header}" cannot be hidden (${key === "gaps" ? "create-approved reads it" : "rows must keep their ID and reasoning"})`);
+    out = columns.filter((c) => !hidden.has(c));
+  }
+  if (sheetCfg.rename) {
+    const renames = new Map(Object.entries(sheetCfg.rename).map(([from, to]) => [find(from), String(to)]));
+    for (const c of renames.keys()) if (NO_RENAME.has(key) && locked.has(c.key)) throw new Error(`config output.workbook.sheets.${name}: "${c.header}" cannot be renamed (create-approved reads it by name)`);
+    out = out.map((c) => (renames.has(c) ? { ...c, header: renames.get(c) } : c));
+  }
+  return out;
+}
+
+/** The sheets config by SHEETS key; throws on an unknown sheet name. */
+function sheetsConfig(output) {
+  const sheets = output?.workbook?.sheets ?? {};
+  return Object.fromEntries(Object.entries(sheets).map(([name, v]) => {
+    const key = sheetKey(name);
+    if (!key) throw new Error(`config output.workbook.sheets: unknown sheet "${name}". Sheets: ${Object.values(SHEETS).join(", ")}`);
+    return [key, v];
+  }));
+}
+
+/** Validate `output` from config/config.yaml against the real columns, so a typo fails the run before tokens are spent. */
+export function checkOutputConfig(output) {
+  const fields = outputFields({ output }, loadLlmSchema);
+  const conf = sheetsConfig(output);
+  for (const key of Object.keys(SHEETS)) layoutColumns(key, [...COLUMNS[key], ...extraColumns(fieldsForSheet(fields, key))], conf[key]);
+  return fields;
+}
+
 /** Review sections that have their own sheet; 11_Agent_Reviews shows one pointer row for them instead of a copy. */
 const OWN_SHEET = {
   "context-builder": { moduleContext: SHEETS.context },
@@ -96,13 +283,13 @@ const OWN_SHEET = {
 };
 
 /** 8_Test_Design rows: every designed case with its coverage verdict and, when not covered, its gap id. */
-export function testDesignRows(testDesign, urls) {
+export function testDesignRows(testDesign, urls, fields = []) {
   return (testDesign?.cases ?? []).map((tc) => ({
     tcId: tc.tcId, story: tc.storyKey, storyUrl: urls.jira(tc.storyKey), title: tc.title, whyNeeded: tc.whyNeeded,
     basis: tc.basis.join(", "), scenarios: tc.scenarioIds.join(", "), flow: tc.flow, type: tc.type,
     steps: (tc.steps ?? []).map((x, i) => `${i + 1}. ${x}`).join("\n"), expected: tc.expected,
     verdict: tc.check?.verdict ?? "", matched: (tc.check?.matchedKeys ?? []).join(", "), confidence: tc.check?.confidence ?? "",
-    missing: tc.check?.missingAspects ?? "", reasoning: tc.check?.reasoning ?? "", gapId: tc.gapId ?? "",
+    missing: tc.check?.missingAspects ?? "", reasoning: tc.check?.reasoning ?? "", gapId: tc.gapId ?? "", ...extraCells(tc, fields),
   }));
 }
 
@@ -179,7 +366,9 @@ export async function readGapSheet(file) {
   return { wb, ws, headers, rows, profileName: wb.subject };
 }
 
-export async function buildWorkbook({ file, profile, scope, stories, zephyr, tokenRecords, runLog, runInfo, urls, handoffs = [], agentResults = null, moduleContext = null, testDesign = null }) {
+export async function buildWorkbook({ file, profile, scope, stories, zephyr, tokenRecords, runLog, runInfo, urls, handoffs = [], agentResults = null, moduleContext = null, testDesign = null, output = null }) {
+  const fields = outputFields({ output });
+  const layout = sheetsConfig(output);
   const wb = new ExcelJS.Workbook();
   wb.creator = "coverage-gap-analysis";
   wb.subject = profile.name;
@@ -221,7 +410,7 @@ export async function buildWorkbook({ file, profile, scope, stories, zephyr, tok
         evidenceUrl: ev ? urls.code(e.repo, ev.path) : null,
         codeOnly: e.codeOnly ? "Yes — verify intended behaviour" : e.uiOnly ? "UI only — verify intended behaviour" : "No",
         agentReview: [dropped ? `dropped by ${e.droppedBy}` : "", e.addedBy ? `added by ${e.addedBy}` : "", e.codeReview ?? "", e.suspectedBug ? "SUSPECTED BUG" : "", e.uiCheck ? `UI ${e.uiCheck}` : ""].filter(Boolean).join("; "),
-        reasoning: e.reasoning,
+        reasoning: e.reasoning, ...extraCells(e, fieldsForSheet(fields, "expected")),
       });
     }
     for (const sk of s.skippedUcs ?? []) {
@@ -258,7 +447,7 @@ export async function buildWorkbook({ file, profile, scope, stories, zephyr, tok
         id: m.expectedId, story: s.story.key, storyUrl: urls.jira(s.story.key), module: s.story.module,
         scenario: byId.get(m.expectedId)?.title ?? "", matched: m.matchedKeys.join(", "), verdict: m.verdict, confidence: m.confidence,
         autoAccepted: m.autoAccepted ? "Yes" : "No", decidedBy: m.decidedBy, missing: m.missingAspects, reasoning: m.reasoning,
-        scope: "Gap analysis",
+        scope: "Gap analysis", ...extraCells(m, fieldsForSheet(fields, "matching")),
       });
     }
     for (const m of s.auditMatches ?? []) {
@@ -288,13 +477,14 @@ export async function buildWorkbook({ file, profile, scope, stories, zephyr, tok
         suggested: d.suggestedDecision ?? "Review", decisionReasoning: d.decisionReasoning ?? g.draftError ?? "",
         decision: g.reviewDecision ?? (d.suggestedDecision === "Approve" ? "Approve" : d.suggestedDecision === "Reject" ? "Reject" : "Review"),
         notes: g.notes ?? "", createdKey: g.createdKey ?? "", createdUrl: g.createdKey ? urls.zephyr(g.createdKey) : null,
+        ...extraCells(d, fieldsForSheet(fields, "gaps")),
       });
     }
   }
   problems.push(...checkReasoning(SHEETS.gaps, gapRows, "gapReasoning", "gapId"));
   problems.push(...checkReasoning(SHEETS.gaps, gapRows, "decisionReasoning", "gapId"));
 
-  const designRows = testDesignRows(testDesign, urls);
+  const designRows = testDesignRows(testDesign, urls, fieldsForSheet(fields, "design"));
   problems.push(...checkReasoning(SHEETS.design, designRows, "whyNeeded", "tcId"));
   problems.push(...checkReasoning(SHEETS.design, designRows, "reasoning", "tcId"));
 
@@ -355,6 +545,7 @@ export async function buildWorkbook({ file, profile, scope, stories, zephyr, tok
   title("Sheets");
   span(header(["Sheet", "Rows", "What it holds"]), 3);
   for (const [k, name] of Object.entries(SHEETS)) {
+    if (layout[k] === false) continue;
     const absent = AGENT_ONLY.has(k) && !agentResults;
     const r = ws.addRow([{ text: name, hyperlink: `#'${name}'!A1` }, absent ? "agent runs only" : rowCount[k], SHEET_INFO[k]]);
     r.getCell(1).font = { color: { argb: "FF0563C1" }, underline: true, bold: k === "gaps" };
@@ -423,132 +614,27 @@ export async function buildWorkbook({ file, profile, scope, stories, zephyr, tok
   ws.addRow(["cache hit ratio (cache read / all input)", `${Math.round(tt.cache_hit_ratio * 100)}%`]);
   ws.addRow(["calls served from cache (no new tokens)", `${tt.reused} of ${tt.calls}`]);
 
-  // ---------- detail sheets, in SHEETS order ----------
-  addTable(wb, SHEETS.context, [
-    { header: "Section", key: "section", width: 20 }, { header: "ID", key: "id", width: 8 }, { header: "Item", key: "item", width: 50, wrap: true },
-    { header: "Detail / expected", key: "detail", width: 70, wrap: true }, { header: "Status", key: "status", width: 18 },
-    { header: "Sources", key: "sources", width: 40, wrap: true },
-  ], contextRows);
-
-  addTable(wb, SHEETS.triage, [
-    { header: "Key", key: "key", width: 13, link: "url" }, { header: "Summary", key: "summary", width: 50, wrap: true },
-    { header: "Epic", key: "epic", width: 30, wrap: true }, { header: "Module", key: "module", width: 22 },
-    { header: "Module source", key: "moduleSource", width: 22, wrap: true }, { header: "Status", key: "status", width: 13 },
-    { header: "Labels", key: "labels", width: 14 }, { header: "Created", key: "created", width: 11 }, { header: "Updated", key: "updated", width: 11 },
-    { header: "AC source", key: "acSource", width: 12 }, { header: "Testable", key: "testable", width: 10 },
-    { header: "Decided by", key: "decidedBy", width: 24 }, { header: "Agent flags (AC quality)", key: "flags", width: 35, wrap: true },
-    { header: "Reasoning", key: "reasoning", width: 70, wrap: true },
-  ], triageRows);
-
-  addTable(wb, SHEETS.links, [
-    { header: "Key", key: "key", width: 13, link: "url" }, { header: "Module", key: "module", width: 22 },
-    { header: "Related stories followed", key: "related", width: 26, wrap: true }, { header: "Linked Zephyr cases", key: "linked", width: 40, wrap: true },
-    { header: "# linked", key: "count", width: 9 }, { header: "Result", key: "result", width: 30 }, { header: "Reasoning", key: "reasoning", width: 70, wrap: true },
-  ], linkRows);
-
-  addTable(wb, SHEETS.expected, [
-    { header: "ID", key: "id", width: 28 }, { header: "Story", key: "story", width: 13, link: "storyUrl" }, { header: "Module", key: "module", width: 20 },
-    { header: "Source", key: "source", width: 10 }, { header: "UC / flow", key: "uc", width: 14 }, { header: "Scenario", key: "scenario", width: 45, wrap: true },
-    { header: "Type", key: "type", width: 12 }, { header: "Priority hint", key: "priorityHint", width: 10 }, { header: "Steps", key: "steps", width: 50, wrap: true },
-    { header: "Expected", key: "expected", width: 40, wrap: true }, { header: "Evidence", key: "evidence", width: 45, wrap: true, link: "evidenceUrl" },
-    { header: "Code / UI only?", key: "codeOnly", width: 16 }, { header: "Agent review", key: "agentReview", width: 26, wrap: true },
-    { header: "Derivation reasoning", key: "reasoning", width: 70, wrap: true },
-  ], expectedRows);
-
-  addTable(wb, SHEETS.ui, [
-    { header: "Kind", key: "kind", width: 15 }, { header: "ID", key: "id", width: 16 }, { header: "Screen", key: "screen", width: 24, wrap: true },
-    { header: "URL", key: "url", width: 30, wrap: true }, { header: "Functionality / item", key: "what", width: 45, wrap: true },
-    { header: "Action", key: "action", width: 40, wrap: true }, { header: "Observed result", key: "result", width: 40, wrap: true },
-    { header: "Element (role / name / text)", key: "element", width: 35, wrap: true }, { header: "Confidence", key: "confidence", width: 11 },
-    { header: "Screenshot", key: "screenshot", width: 30, link: "screenshotUrl" }, { header: "Reasoning / uncertainty", key: "reasoning", width: 60, wrap: true },
-  ], uiRows);
-
-  addTable(wb, SHEETS.cases, [
-    { header: "Key", key: "key", width: 12, link: "url" }, { header: "Name", key: "name", width: 50, wrap: true }, { header: "Folder", key: "folder", width: 40, wrap: true },
-    { header: "Labels", key: "labels", width: 20 }, { header: "Status", key: "status", width: 11 }, { header: "Priority", key: "priority", width: 9 },
-    { header: "Automation", key: "automation", width: 13 }, { header: "Linked issue ids", key: "linkedTo", width: 14 }, { header: "Compared for stories", key: "forStories", width: 18 },
-    { header: "Objective / BDD (normalized)", key: "normalized", width: 60, wrap: true }, { header: "Reasoning", key: "reasoning", width: 45, wrap: true },
-  ], caseRows);
-
-  addTable(wb, SHEETS.matching, [
-    { header: "Expected ID", key: "id", width: 28 }, { header: "Story", key: "story", width: 13, link: "storyUrl" }, { header: "Module", key: "module", width: 18 },
-    { header: "Scenario", key: "scenario", width: 45, wrap: true }, { header: "Matched case(s)", key: "matched", width: 22, wrap: true },
-    { header: "Verdict", key: "verdict", width: 10, color: true }, { header: "Confidence", key: "confidence", width: 11 }, { header: "Auto-accepted", key: "autoAccepted", width: 12 },
-    { header: "Decided by", key: "decidedBy", width: 12 }, { header: "Scope", key: "scope", width: 18 },
-    { header: "Missing aspects", key: "missing", width: 40, wrap: true }, { header: "Match reasoning", key: "reasoning", width: 70, wrap: true },
-  ], matchRows);
-
-  addTable(wb, SHEETS.design, [
-    { header: "TC ID", key: "tcId", width: 9 }, { header: "Story", key: "story", width: 13, link: "storyUrl" }, { header: "Designed case", key: "title", width: 45, wrap: true },
-    { header: "Should be tested because", key: "whyNeeded", width: 55, wrap: true }, { header: "Basis (rules / workflows)", key: "basis", width: 22, wrap: true },
-    { header: "Scenarios", key: "scenarios", width: 24, wrap: true }, { header: "Flow", key: "flow", width: 9 }, { header: "Type", key: "type", width: 11 },
-    { header: "Steps", key: "steps", width: 50, wrap: true }, { header: "Expected", key: "expected", width: 40, wrap: true },
-    { header: "Verdict", key: "verdict", width: 10, color: true }, { header: "Covered by", key: "matched", width: 16, wrap: true }, { header: "Confidence", key: "confidence", width: 11 },
-    { header: "Missing aspects", key: "missing", width: 40, wrap: true }, { header: "Check reasoning", key: "reasoning", width: 60, wrap: true },
-    { header: "Gap ID", key: "gapId", width: 22 },
-  ], designRows);
-
-  const gapWs = addTable(wb, SHEETS.gaps, [
-    { header: "Gap ID", key: "gapId", width: 20 }, { header: "Story", key: "story", width: 13, link: "storyUrl" }, { header: "Module", key: "module", width: 18 },
-    { header: "Scenario", key: "scenario", width: 40, wrap: true }, { header: "Source", key: "source", width: 9 }, { header: "Type", key: "type", width: 11 },
-    { header: "Verdict", key: "verdict", width: 10, color: true }, { header: "Partially covered by", key: "matched", width: 14 },
-    { header: "Why it is a gap", key: "gapReasoning", width: 50, wrap: true }, { header: "Agent review", key: "agentReview", width: 24, wrap: true },
-    { header: "Validation", key: "validation", width: 40, wrap: true },
-    { header: "Suggested decision", key: "suggested", width: 11, color: true }, { header: "Decision reasoning", key: "decisionReasoning", width: 50, wrap: true },
-    { header: "Review decision", key: "decision", width: 11, color: true }, { header: "Reviewer notes", key: "notes", width: 30, wrap: true },
-    { header: "Action", key: "action", width: 8 }, { header: "Extend key", key: "extendKey", width: 12 },
-    { header: "Draft name", key: "name", width: 45, wrap: true }, { header: "Objective", key: "objective", width: 45, wrap: true },
-    { header: "Precondition", key: "precondition", width: 35, wrap: true },
-    { header: "Steps (n. action [data: x] => expected)", key: "steps", width: 70, wrap: true },
-    { header: "BDD", key: "bdd", width: 40, wrap: true }, { header: "Labels", key: "labels", width: 20 },
-    { header: "Priority", key: "priority", width: 9 }, { header: "Priority reasoning", key: "priorityReasoning", width: 40, wrap: true },
-    { header: "Folder id", key: "folderId", width: 10 }, { header: "Folder path", key: "folderPath", width: 40, wrap: true }, { header: "Folder reasoning", key: "folderReasoning", width: 40, wrap: true },
-    { header: "Created key", key: "createdKey", width: 12, link: "createdUrl" }, { header: "Story issue id", key: "storyId", width: 10, hidden: true },
-    { header: "Expected ID", key: "expectedId", width: 10, hidden: true },
-  ], gapRows);
-  const decisionCol = gapWs.getColumn("decision").number;
-  for (let r = 2; r <= gapRows.length + 1; r++) {
-    gapWs.getCell(r, decisionCol).dataValidation = { type: "list", allowBlank: false, formulae: [`"${REVIEW_OPTIONS.join(",")}"`] };
+  // ---------- detail sheets, in SHEETS order, laid out by config output.workbook ----------
+  const sheetRows = {
+    context: contextRows, triage: triageRows, links: linkRows, expected: expectedRows, ui: uiRows, cases: caseRows, matching: matchRows,
+    design: designRows, gaps: gapRows, orphans: orphanRows, agents: agentSheetRows, reviews: reviewRows, runLog,
+    tokens: tokenRecords.map(({ cost_usd, ...r }) => ({
+      ...r, keys: (r.jiraKeys ?? []).join(", "), reused: r.reused ? "Yes" : "No", failed: r.failed ? "Yes" : "",
+      total: r.reused ? 0 : totalTokens(r),
+      ...(r.reused ? { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0 } : {}),
+    })),
+  };
+  for (const [key, name] of Object.entries(SHEETS)) {
+    const columns = layoutColumns(key, [...COLUMNS[key], ...extraColumns(fieldsForSheet(fields, key))], layout[key]);
+    if (!columns) continue;
+    const sheet = addTable(wb, name, columns, sheetRows[key]);
+    if (key === "gaps") {
+      const decisionCol = sheet.getColumn("decision").number;
+      for (let r = 2; r <= gapRows.length + 1; r++) {
+        sheet.getCell(r, decisionCol).dataValidation = { type: "list", allowBlank: false, formulae: [`"${REVIEW_OPTIONS.join(",")}"`] };
+      }
+    }
   }
-
-  addTable(wb, SHEETS.orphans, [
-    { header: "Key", key: "key", width: 12, link: "url" }, { header: "Linked story", key: "story", width: 13 }, { header: "Name", key: "name", width: 50, wrap: true },
-    { header: "Folder", key: "folder", width: 40, wrap: true }, { header: "Reasoning", key: "reasoning", width: 70, wrap: true },
-  ], orphanRows);
-
-  addTable(wb, SHEETS.agents, [
-    { header: "Agent", key: "agent", width: 20 }, { header: "Phase", key: "phase", width: 10 }, { header: "Status", key: "status", width: 10 },
-    { header: "Model", key: "model", width: 10 }, { header: "Tokens", key: "tokens", width: 11 }, { header: "Duration s", key: "duration", width: 10 },
-    { header: "Result from", key: "reusedFrom", width: 22 }, { header: "Findings", key: "findings", width: 90, wrap: true },
-    { header: "Forwarded notes", key: "forwardNotes", width: 50, wrap: true }, { header: "Review file", key: "reviewFile", width: 22 },
-    { header: "Applied by a later stage", key: "applied", width: 40, wrap: true },
-  ], agentSheetRows);
-
-  addTable(wb, SHEETS.reviews, [
-    { header: "Agent", key: "agent", width: 20 }, { header: "Section", key: "section", width: 16 }, { header: "ID", key: "id", width: 28 },
-    { header: "Title / decision", key: "title", width: 45, wrap: true }, { header: "Reasoning", key: "reasoning", width: 60, wrap: true },
-    { header: "Full item (JSON)", key: "detail", width: 80, wrap: true },
-  ], reviewRows);
-
-  addTable(wb, SHEETS.runLog, [
-    { header: "Step", key: "step", width: 22 }, { header: "Module / batch", key: "batch", width: 24 }, { header: "Time", key: "at", width: 20 },
-    { header: "In", key: "countIn", width: 8 }, { header: "Out", key: "countOut", width: 8 }, { header: "Details / assumptions", key: "notes", width: 80, wrap: true },
-    { header: "Skipped + why", key: "skipped", width: 50, wrap: true }, { header: "Errors", key: "errors", width: 50, wrap: true },
-  ], runLog);
-
-  addTable(wb, SHEETS.tokens, [
-    { header: "Time", key: "at", width: 20 }, { header: "Stage", key: "stage", width: 12 }, { header: "Module", key: "module", width: 20 },
-    { header: "Jira keys", key: "keys", width: 24, wrap: true }, { header: "Model", key: "model", width: 18 }, { header: "Reused (cache)", key: "reused", width: 9 },
-    { header: "Failed", key: "failed", width: 8 }, { header: "Input", key: "input_tokens", width: 9 }, { header: "Output", key: "output_tokens", width: 9 },
-    { header: "Cache read", key: "cache_read_tokens", width: 10 }, { header: "Cache write", key: "cache_creation_tokens", width: 10 }, { header: "Total", key: "total", width: 10 },
-    { header: "Duration ms", key: "duration_ms", width: 11 }, { header: "Turns", key: "num_turns", width: 7 },
-    { header: "Prompt bytes", key: "input_bytes", width: 11 }, { header: "Items in", key: "items_in", width: 8 }, { header: "Items out", key: "items_out", width: 8 },
-    { header: "Error", key: "error", width: 40, wrap: true },
-  ], tokenRecords.map(({ cost_usd, ...r }) => ({
-    ...r, keys: (r.jiraKeys ?? []).join(", "), reused: r.reused ? "Yes" : "No", failed: r.failed ? "Yes" : "",
-    total: r.reused ? 0 : totalTokens(r),
-    ...(r.reused ? { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0 } : {}),
-  })));
 
   await wb.xlsx.writeFile(file);
   return { sheets: wb.worksheets.map((w) => w.name), counts: { triage: triageRows.length, expected: expectedRows.filter((r) => !r.id.endsWith(":skipped") && !r.scenario.startsWith("(dropped)")).length, matches: matchRows.filter((r) => r.scope === "Gap analysis").length, gaps: gapRows.length, orphans: orphanRows.length } };

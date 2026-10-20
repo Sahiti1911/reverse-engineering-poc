@@ -257,6 +257,46 @@ pipeline run, so the numbers never shift. The Summary starts with a linked index
 
 `create-approved` and re-runs still read workbooks built before this order (review sheet `8_Gaps` or `6_Gaps`).
 
+### Choosing what is produced: `output` in `config/config.yaml`
+
+- `output.workbook.sheets`: leave a sheet out (`false`), keep only some columns in your order (`columns`), drop some
+  (`hide`) or change header text (`rename`). IDs and reasoning columns always stay, and so do the 9_Gaps columns
+  `create-approved` reads (those cannot be renamed either). 9_Gaps cannot be left out.
+- `output.fields`: extra fields Claude fills in, e.g. a `riskLevel` on every draft or `testData` on every scenario.
+  Each one is added to the stage's schema and prompt (only that stage's cache is invalidated) and shows up as a
+  column in the stage's sheet and in `coverage.json`. Scenarios parsed from UC docs (0 tokens) and items agents add
+  in their reviews leave the column empty.
+
+The section is checked when a run starts, so a wrong sheet, column or field name stops the run before any tokens are
+spent. The column definitions are `COLUMNS` in `scripts/lib/workbook.mjs`; the field handling is `scripts/lib/output.mjs`.
+
+## Gaps workbook
+
+Every run also writes `gaps_<profile>_<scope>.xlsx` next to the full workbook. The full workbook does not change.
+The gaps workbook is the short list for the team. Turn it off with `output.gapsWorkbook: false`.
+
+| Sheet | Content |
+|---|---|
+| Gaps | One row per gap. **Category** Requirement (type Unclear / Missing / Incomplete / Open question) or Test case (Missing / Incomplete), with title, description, gap reason, **suggested fix**, **severity** (1 Impacts functionality · 2 Impacts traceability · 3 Good to have) and its reasoning, and the evidence ids. Sorted by severity. |
+| Supporting Evidence | One row per source: Jira story, acceptance criteria / UC, code location (Bitbucket link at the analysed commit), UI observation or screenshot, Zephyr case, module-context item. Shows which gaps use it. |
+
+- **Requirement gaps** are collected by script from what the run already found:
+  - the requirements-analyst's AC flags
+  - undecided triage
+  - stories without scenarios
+  - skipped UCs
+  - behaviour found only in code or UI
+  - suspected bugs
+  - the module context's open questions, unconfirmed rules and known issues
+- **Test-case gaps** are the rows of 9_Gaps, with the same ids. Their suggested fix is the draft (create or extend).
+- **The `gap-review` stage** (`prompts/gap-review.md`, model `models.gap-review`, batches of `batch.gap-review`):
+  - sets the severity of every gap;
+  - writes the type, the wording and a concrete suggested fix for each requirement gap;
+  - drops requirement candidates that are noise. The run log lists them, under gaps-workbook.
+- **It is cached like every stage.** A re-run with unchanged gaps costs 0 tokens.
+- **Without that review** (dry run, budget reached, error), severity and suggested fix come from rules. Such rows show
+  "Reviewed by: rule".
+
 ## JSON files
 
 Each JSON file of a run starts with the same `version`, `run` header (name, time, profile, scope, Zephyr export,
@@ -264,7 +304,7 @@ code commits) and `files` index (paths relative to the run folder; `null` when t
 
 | File | Content |
 |---|---|
-| `coverage.json` | The results, twin of the workbook: `counts`, `moduleContext`, `ui` evidence, and per story `linkedCases`, `scenarios`, `verdicts`, `gaps` (with drafts) and `orphans` |
+| `coverage.json` | The results, twin of the workbook: `counts`, `moduleContext`, `gapReport` (the gaps workbook's rows, evidence and dropped candidates), `ui` evidence, and per story `linkedCases`, `scenarios`, `verdicts`, `gaps` (with drafts) and `orphans` |
 | `agents.json` | Agent runs: per agent status, tokens, findings, forwarded notes, `reviewFile` / `reviewWritten` and what was applied. The review itself stays in `review/` |
 | `summary.json` | Counts and tokens (total, pipeline, agents, by stage) |
 | `module-context.json` / `.md` | The module context alone, and its readable brief (what the test-designer works from) |

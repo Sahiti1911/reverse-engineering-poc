@@ -4,17 +4,19 @@ import path from "node:path";
 import { callClaude, resolveClaudeBin } from "./claude.mjs";
 import { loadPrompt, loadLlmSchema } from "./config.mjs";
 import { hash, readJson, writeJson, slug } from "./util.mjs";
+import { withExtraFields, extraFieldsPrompt } from "./output.mjs";
 
 export class BudgetExceeded extends Error {}
 
-export function createLlm({ runCfg, cacheDir, tokenLog, force = false, dryRun = false, extraSystem = {} }) {
+export function createLlm({ runCfg, cacheDir, tokenLog, force = false, dryRun = false, extraSystem = {}, fields = [] }) {
   let bin;
   const stagePrompt = {};
   const stageSchema = {};
 
   async function run(stage, { cacheKey, fingerprint, prompt, jiraKeys = [], module = null, itemsIn = 0, countOut = () => 0 }) {
-    stagePrompt[stage] ??= loadPrompt(stage) + (extraSystem[stage] ? `\n\n${extraSystem[stage]}` : "");
-    stageSchema[stage] ??= loadLlmSchema(stage);
+    // config output.fields extend the schema and prompt; both are in the fingerprint, so only this stage's cache changes.
+    stagePrompt[stage] ??= [loadPrompt(stage), extraSystem[stage], extraFieldsPrompt(fields, stage)].filter(Boolean).join("\n\n");
+    stageSchema[stage] ??= withExtraFields(loadLlmSchema(stage), stage, fields);
     const model = runCfg.models[stage];
     const fp = hash({ fingerprint, system: stagePrompt[stage], schema: stageSchema[stage], model });
     const file = path.join(cacheDir, "llm", stage, `${slug(cacheKey)}-${hash(cacheKey).slice(0, 6)}.json`);

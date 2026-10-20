@@ -73,6 +73,17 @@ const schemas = {
       decisionReasoning: str,
     })),
   }),
+  "gap-review": obj({
+    items: arr(obj({
+      id: str,
+      keep: { type: "boolean" },
+      keepReasoning: str,
+      gapType: { enum: ["Unclear", "Missing", "Incomplete", "Open question"] },
+      title: str, description: str, gapReason: str, suggestedFix: str,
+      severity: { enum: [1, 2, 3] },
+      severityReasoning: str,
+    })),
+  }),
 };
 
 for (const [stage, schema] of Object.entries(schemas)) writeJson(`schema/llm/${stage}.schema.json`, schema);

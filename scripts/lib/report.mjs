@@ -9,7 +9,7 @@ import { SHEETS } from "./workbook.mjs";
 
 const n = (x) => Number(x ?? 0).toLocaleString("en-US");
 
-export function renderSummary({ ctx, built, workbookPath, handoffs = [] }) {
+export function renderSummary({ ctx, built, workbookPath, handoffs = [], gapsFile = null }) {
   const { state, profile } = ctx;
   const scope = state.scope;
   const tok = summarizeTokens(ctx.tokenLog.records);
@@ -31,6 +31,11 @@ export function renderSummary({ ctx, built, workbookPath, handoffs = [] }) {
   if (scope.moduleFilter) L.push(`- Keywords: ${scope.keywords.map((k) => `\`${k}\``).join(", ")}`);
   L.push(`- Run: ${state.runAt} · code ${state.codeCommits.join(", ") || "not analysed"} · Zephyr export ${state.zephyrExportedAt ?? "?"}`);
   L.push(`- Workbook: \`${workbookPath}\``);
+  if (gapsFile) {
+    const sev = (s) => gapsFile.items.filter((i) => i.severity === s).length;
+    const cat = (c) => gapsFile.items.filter((i) => i.category === c).length;
+    L.push(`- Gaps workbook: \`${gapsFile.path}\` — ${gapsFile.items.length} gap(s) (${cat("Requirement")} requirement, ${cat("Test case")} test case); severity 1: ${sev(1)}, 2: ${sev(2)}, 3: ${sev(3)}`);
+  }
   L.push("");
 
   const blocked = handoffs.find((h) => h.status !== "ok");
@@ -123,8 +128,8 @@ export function renderSummary({ ctx, built, workbookPath, handoffs = [] }) {
 }
 
 /** summary.md and summary.json; `run` and `files` are the header and file index shared by the run's JSON files (run-outputs.mjs). */
-export function writeSummary({ ctx, built, workbookPath, handoffs, run, files }) {
-  const { text, tok } = renderSummary({ ctx, built, workbookPath, handoffs });
+export function writeSummary({ ctx, built, workbookPath, handoffs, run, files, gaps = null }) {
+  const { text, tok } = renderSummary({ ctx, built, workbookPath, handoffs, gapsFile: gaps });
   const file = path.join(ctx.runDir, "summary.md");
   fs.writeFileSync(file, text);
   fs.writeFileSync(path.join(path.dirname(ctx.runDir), "latest-summary.md"), text);

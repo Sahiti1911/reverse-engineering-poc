@@ -15,7 +15,10 @@ import vm from "node:vm";
 import { RunContext } from "../scripts/lib/context.mjs";
 import { applyRequirementsReview, applyCodeReview, applyContextReview, applyScoutReview, applyUiReview, applyZephyrReview, applyValidationReview, primaryStory } from "../scripts/lib/reviews.mjs";
 import { renderSummary } from "../scripts/lib/report.mjs";
-import { formatSteps, parseSteps, buildWorkbook, readGapSheet } from "../scripts/lib/workbook.mjs";
+import { formatSteps, parseSteps, buildWorkbook, readGapSheet, layoutColumns, sheetKey, checkOutputConfig, COLUMNS } from "../scripts/lib/workbook.mjs";
+import { outputFields, withExtraFields, extraFieldsPrompt, extraCells, pickExtras } from "../scripts/lib/output.mjs";
+import { coverageJson } from "../scripts/lib/run-outputs.mjs";
+import { loadLlmSchema } from "../scripts/lib/config.mjs";
 import { selectCandidates } from "../scripts/lib/candidates.mjs";
 import { segments, candidatePhrases, scoreKeyword, chooseKeywords, bridgeToCode, locateModule, dominantFolder } from "../scripts/lib/vocab.mjs";
 import { loadProfile, resolveModule, loadModulesCatalog, loadRunConfig } from "../scripts/lib/config.mjs";
@@ -732,7 +735,7 @@ test("run outputs: shared run header and file index; coverage.json carries resul
   const ui = { inventory: [{ id: "UI-001" }], observations: [], scenarios: [], blockedRequests: [], consoleErrors: [], screenshots: ["ui/UI-001_a.png"] };
   const cov = coverageJson({ run, files, counts: { gaps: 1 }, moduleContext: SAMPLE_CONTEXT, ui, stories: [r] });
   assert.equal(cov.version, OUTPUT_VERSION);
-  assert.deepEqual(Object.keys(cov), ["version", "run", "files", "counts", "moduleContext", "testDesign", "ui", "stories"]);
+  assert.deepEqual(Object.keys(cov), ["version", "run", "files", "counts", "moduleContext", "testDesign", "gapReport", "ui", "stories"]);
   assert.deepEqual(Object.keys(cov.stories[0]), ["key", "summary", "module", "testable", "dropped", "linkedCases", "scenarios", "verdicts", "gaps", "orphans"]);
   assert.deepEqual([cov.stories[0].linkedCases, cov.stories[0].orphans], [["QA-T1"], [{ key: "QA-T9", reasoning: "other feature" }]]);
   assert.equal(cov.ui.screenshots[0], "ui/UI-001_a.png");
@@ -844,4 +847,173 @@ test("test design: a designed case keeps a settled scenario verdict instead of b
   assert.deepEqual([missing.verdict, missing.confidence], ["Missing", "Medium"]);
   // Not settled: no scenarios, a Partial, a Covered that was not auto-accepted, mixed verdicts, or another story's scenario.
   for (const ids of [[], ["A:S4"], ["A:S5"], ["A:S1", "A:S3"], ["B:S1"], ["A:UNKNOWN"]]) assert.equal(inheritedCheck(tc(ids), matchById, storyOf), null, ids.join(","));
+});
+
+test("output.fields: validated, added to the stage schema and prompt only, and turned into cells", () => {
+  const fields = outputFields({ output: { fields: [{ name: "riskLevel", stages: ["draft", "design"], description: "Risk.", values: ["Low", "High"], header: "Risk" }, { name: "testData", stage: "extract-ac", description: "Data.", list: true }] } }, loadLlmSchema);
+  assert.deepEqual(fields.map((f) => [f.name, f.stages, f.header]), [["riskLevel", ["draft", "design"], "Risk"], ["testData", ["extract-ac"], "testData"]]);
+  const draft = loadLlmSchema("draft");
+  const ext = withExtraFields(draft, "draft", fields);
+  assert.deepEqual(ext.properties.drafts.items.properties.riskLevel, { enum: ["Low", "High"] });
+  assert.ok(ext.properties.drafts.items.required.includes("riskLevel"));
+  assert.equal(draft.properties.drafts.items.properties.riskLevel, undefined, "input schema untouched");
+  assert.deepEqual(withExtraFields(loadLlmSchema("extract-ac"), "extract-ac", fields).properties.stories.items.properties.scenarios.items.properties.testData, { type: "array", items: { type: "string" } });
+  const match = loadLlmSchema("match");
+  assert.equal(withExtraFields(match, "match", fields), match, "a stage without extra fields keeps its schema (and its cache)");
+  assert.match(extraFieldsPrompt(fields, "draft"), /`riskLevel` \(one of Low \| High\): Risk\./);
+  assert.equal(extraFieldsPrompt(fields, "match"), "");
+  assert.deepEqual(extraCells({ testData: ["a", "b"] }, fields), { x_riskLevel: "", x_testData: "a, b" });
+  assert.deepEqual(pickExtras({ riskLevel: "Low" }, fields), { riskLevel: "Low", testData: null });
+  for (const [f, rx] of [
+    [{ name: "verdict", stages: ["match"], description: "x" }, /already has a field "verdict"/],
+    [{ name: "gapId", stages: ["draft"], description: "x" }, /used by the pipeline/],
+    [{ name: "risk", stages: ["triage"], description: "x" }, /unknown stage "triage"/],
+    [{ name: "risk", stages: ["draft"] }, /description is required/],
+    [{ name: "Risk level", stages: ["draft"], description: "x" }, /camelCase/],
+  ]) assert.throws(() => outputFields({ output: { fields: [f] } }, loadLlmSchema), rx);
+});
+
+test("output.workbook: sheets can be dropped and columns picked, hidden or renamed, but IDs, reasoning and create-approved columns stay", () => {
+  assert.equal(sheetKey("7_Matching"), "matching");
+  assert.equal(sheetKey("Run log"), "runLog");
+  assert.equal(sheetKey("nope"), null);
+  const pick = layoutColumns("matching", COLUMNS.matching, { columns: ["Verdict", "story"], rename: { "Match reasoning": "Why" } });
+  assert.deepEqual(pick.map((c) => c.header), ["Verdict", "Story", "Expected ID", "Why"]);
+  assert.equal(layoutColumns("expected", COLUMNS.expected, { hide: ["Module"] }).some((c) => c.key === "module"), false);
+  assert.equal(layoutColumns("runLog", COLUMNS.runLog, false), null);
+  assert.equal(layoutColumns("tokens", COLUMNS.tokens, undefined), COLUMNS.tokens);
+  assert.throws(() => layoutColumns("gaps", COLUMNS.gaps, false), /cannot be switched off/);
+  assert.throws(() => layoutColumns("matching", COLUMNS.matching, { hide: ["Match reasoning"] }), /cannot be hidden/);
+  assert.throws(() => layoutColumns("gaps", COLUMNS.gaps, { rename: { "Draft name": "Name" } }), /cannot be renamed/);
+  assert.throws(() => layoutColumns("matching", COLUMNS.matching, { hide: ["Nope"] }), /no column "Nope"/);
+  assert.throws(() => layoutColumns("matching", COLUMNS.matching, { columns: ["Verdict"], hide: ["Scope"] }), /not both/);
+  assert.throws(() => checkOutputConfig({ workbook: { sheets: { "99_Nope": false } } }), /unknown sheet "99_Nope"/);
+  assert.doesNotThrow(() => checkOutputConfig(loadRunConfig().output));
+});
+
+test("buildWorkbook and coverage.json follow config output: dropped sheets, chosen columns, extra fields", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cov-"));
+  const file = path.join(dir, "a.xlsx");
+  const run = minimalRun();
+  run.stories[0].matches[0].businessImpact = "Blocks exports";
+  run.stories[0].gaps[0].draft.riskLevel = "High";
+  const output = {
+    fields: [{ name: "businessImpact", stages: ["match"], description: "x", header: "Impact" }, { name: "riskLevel", stages: ["draft"], description: "x", header: "Risk" }],
+    workbook: { sheets: { "13_Run_Log": false, Matching: { columns: ["Expected ID", "Verdict", "Impact"] } } },
+  };
+  const out = await buildWorkbook({ file, ...run, output });
+  assert.equal(out.sheets.includes("13_Run_Log"), false);
+  const { default: ExcelJS } = await import("exceljs");
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(file);
+  const m = wb.getWorksheet("7_Matching");
+  assert.deepEqual(m.getRow(1).values.slice(1), ["Expected ID", "Verdict", "Impact", "Match reasoning"]);
+  assert.deepEqual(m.getRow(2).values.slice(1), ["AVLN-1:S01", "Missing", "Blocks exports", "Nothing found."]);
+  const gaps = await readGapSheet(file);
+  assert.equal(gaps.rows[0].Risk, "High");
+  const summary = [];
+  wb.getWorksheet("Summary").eachRow((r) => summary.push(String(r.getCell(1).value?.text ?? r.getCell(1).value ?? "")));
+  assert.equal(summary.includes("13_Run_Log"), false);
+  const json = coverageJson({ run: {}, files: {}, fields: outputFields({ output }), stories: run.stories.map((s) => ({ ...s, triage: s.triage })) });
+  assert.equal(json.stories[0].verdicts[0].businessImpact, "Blocks exports");
+  assert.equal(json.stories[0].gaps[0].draft.riskLevel, "High");
+});
+
+test("gaps workbook: requirement candidates come from flags, unconfirmed code behaviour, skipped UCs and the module context", async () => {
+  const { collectGapItems } = await import("../scripts/lib/gap-report.mjs");
+  const urls = minimalRun().urls;
+  const r = minimalRun().stories[0];
+  r.flags = [{ by: "agent:requirements-analyst", issue: "AC does not say what happens on an empty grid" }];
+  r.skippedUcs = [{ uc: "UC-03", title: "Audit log", reasoning: "Admin-only UC skipped by profile rule" }, { uc: "UC-09", title: "Other page", reasoning: "off topic", offTopic: true }];
+  r.expected.push({ id: "AVLN-1:CODE-02", storyKey: "AVLN-1", source: "backend", flow: "exception", title: "Download without permission", type: "permission", steps: [], expected: "403", evidence: { path: "api/Export.java", symbol: "download", detail: "no check" }, repo: "gtms", codeOnly: true, codeReview: "needs PO confirmation", reasoning: "Found in code." });
+  r.expected.push({ ...r.expected.at(-1), id: "AVLN-1:CODE-03", title: "Export ignores filter", suspectedBug: true });
+  const items = collectGapItems({ stories: [r], moduleContext: SAMPLE_CONTEXT, urls: { ...urls, code: (repo, p) => `https://code/${repo}/${p}` } });
+  const req = items.filter((i) => i.category === "Requirement");
+  assert.deepEqual(req.map((i) => [i.id, i.source, i.hint]), [
+    ["REQ-01", "ac-flag", "Unclear"], ["REQ-02", "skipped-uc", "Incomplete"], ["REQ-03", "code-only", "Unclear"],
+    ["REQ-04", "suspected-bug", "Incomplete"], // a suspected bug wins over "needs PO confirmation"
+    ["REQ-05", "open-question", "Open question"], ["REQ-06", "rule-needs-confirmation", "Unclear"], ["REQ-07", "known-issue", "Incomplete"],
+  ]);
+  const code = req[2].refs.find((x) => x.kind === "Code");
+  assert.deepEqual([code.ref, code.url], ["api/Export.java :: download", "https://code/gtms/api/Export.java"]);
+  // CODE-02 in the module context is the scenario AVLN-1:CODE-02, not a Jira key.
+  assert.equal(req[4].refs[0].kind, "Code");
+  assert.equal(items.filter((i) => i.category === "Test case").length, 1);
+});
+
+test("gaps workbook: test-case gaps map Partial to Incomplete and suggest the draft as the fix", async () => {
+  const { collectGapItems } = await import("../scripts/lib/gap-report.mjs");
+  const run = minimalRun();
+  const r = run.stories[0];
+  r.gaps.push({ ...r.gaps[0], gapId: "GAP-AVLN-1-S02", verdict: "Partial", matchedKeys: ["QA-T5"], missingAspects: "no error path", draft: { ...r.gaps[0].draft, action: "extend", extendKey: "QA-T5" }, validation: { verdict: "possible-duplicate", duplicateOf: ["QA-T7"], by: "rule", reasoning: "x" } });
+  const tc = collectGapItems({ stories: [r], urls: run.urls }).filter((i) => i.category === "Test case");
+  assert.deepEqual(tc.map((i) => [i.id, i.gapType]), [["GAP-AVLN-1-S01", "Missing"], ["GAP-AVLN-1-S02", "Incomplete"]]);
+  assert.match(tc[0].suggestedFix, /^Create "AVL - X - It works" in R > AVL > X \(1 steps\)$/);
+  assert.match(tc[1].suggestedFix, /^Extend QA-T5: add 1 step\(s\).*possible duplicate of QA-T7/);
+  assert.match(tc[1].description, /Missing: no error path/);
+  assert.deepEqual(tc[1].refs.filter((x) => x.kind === "Zephyr case").map((x) => [x.ref, x.url]), [["QA-T5", "https://x/QA-T5"], ["QA-T7", "https://x/QA-T7"]]);
+});
+
+test("gaps workbook: reviews apply only to the gap they were made for; otherwise severity comes from rules", async () => {
+  const { collectGapItems, applyGapReview, reviewSignature, finalizeGapReport, defaultSeverity } = await import("../scripts/lib/gap-report.mjs");
+  const run = minimalRun();
+  const r = run.stories[0];
+  r.expected[0].flow = "main";
+  r.flags = [{ issue: "Vague AC" }, { issue: "Not a real problem" }];
+  const items = collectGapItems({ stories: [r], urls: run.urls });
+  const [a, b, tc] = items;
+  const reviews = {
+    [a.id]: { sig: reviewSignature(a), keep: true, gapType: "Incomplete", title: "Empty grid not specified", description: "d", gapReason: "AC silent on empty grid", suggestedFix: "Add AC: Given no rows…", severity: 2, severityReasoning: "Traceability only." },
+    [b.id]: { sig: reviewSignature(b), keep: false, keepReasoning: "Duplicate of REQ-01" },
+    [tc.id]: { sig: "stale", severity: 3, severityReasoning: "old" },
+  };
+  const { kept, dropped } = applyGapReview(items, reviews);
+  assert.deepEqual(dropped.map((d) => [d.id, d.dropReasoning]), [[b.id, "Duplicate of REQ-01"]]);
+  const byId = Object.fromEntries(kept.map((k) => [k.id, k]));
+  assert.deepEqual([byId[a.id].gapType, byId[a.id].suggestedFix, byId[a.id].reviewedBy], ["Incomplete", "Add AC: Given no rows…", "Claude"]);
+  // The stale review is ignored: a Missing main-flow test gets severity 1 by rule.
+  assert.deepEqual([byId[tc.id].severity, byId[tc.id].reviewedBy], [1, "rule"]);
+  // Without a review a requirement gap still gets a suggested fix, from its kind.
+  const unreviewed = applyGapReview([a]).kept[0];
+  assert.equal(unreviewed.suggestedFix, "Clarify the acceptance criteria in AVLN-1: Vague AC");
+  assert.match(byId[tc.id].severityReasoning, /^Rule default — not reviewed by Claude/);
+  assert.equal(defaultSeverity({ category: "Test case", gapType: "Incomplete", flow: "alt" }).severity, 3);
+
+  const report = finalizeGapReport(kept);
+  assert.deepEqual(report.items.map((i) => i.id), [tc.id, a.id], "sorted by severity");
+  const story = report.evidence.find((e) => e.kind === "Jira story");
+  assert.deepEqual(story.usedBy.sort(), [a.id, tc.id].sort(), "one evidence row shared by both gaps");
+  assert.ok(report.items.every((i) => i.evidence.includes(story.id)));
+});
+
+test("gaps workbook: Summary, Gaps and Supporting Evidence sheets; rows without reasoning are rejected; the full workbook is unchanged", async () => {
+  const { collectGapItems, applyGapReview, finalizeGapReport, buildGapsWorkbook } = await import("../scripts/lib/gap-report.mjs");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cov-"));
+  const run = minimalRun();
+  const report = finalizeGapReport(applyGapReview(collectGapItems({ stories: run.stories, urls: run.urls })).kept);
+  await buildGapsWorkbook({ file: path.join(dir, "g.xlsx"), report, title: "Gaps — t", runAt: "t", urls: run.urls, tokens: 1234, storySummary: { "AVLN-1": "Some feature" } });
+  const { default: ExcelJS } = await import("exceljs");
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(path.join(dir, "g.xlsx"));
+  assert.deepEqual(wb.worksheets.map((w) => w.name), ["Summary", "Gaps", "Supporting Evidence"]);
+  const gaps = wb.getWorksheet("Gaps");
+  assert.deepEqual(gaps.getRow(1).values.slice(1, 4), ["ID", "Category", "Story"]);
+  assert.equal(gaps.getRow(2).getCell(1).value, "GAP-AVLN-1-S01");
+  assert.equal(gaps.getRow(2).getCell(12).value, report.items[0].evidence.join(", "));
+  const summary = [];
+  wb.getWorksheet("Summary").eachRow((r) => summary.push(r.values.slice(1).map((v) => (v && typeof v === "object" ? `${v.text}->${v.hyperlink}` : v)).join(" | ")));
+  const text = summary.join("\n");
+  assert.match(text, /Gap-review tokens \| 1,234/);
+  assert.match(text, /Gaps->#'Gaps'!A1 \| 1 \|/);
+  assert.match(text, /Test case \| Missing \| 1 \| 1 \| 0 \| 0/, "a Missing test of the main flow is severity 1 by rule");
+  assert.match(text, /AVLN-1->https:\/\/x\/browse\/AVLN-1 \| Some feature \| 0 \| 1/);
+  assert.match(text, /GAP-AVLN-1-S01->#'Gaps'!A2/, "severity-1 list links to the gap's row");
+  assert.doesNotMatch(text, /cost|usd|\$/i);
+  const ev = wb.getWorksheet("Supporting Evidence");
+  assert.equal(ev.getRow(2).getCell(1).value, "EV-01");
+  const bad = { ...report, items: report.items.map((i) => ({ ...i, severityReasoning: "" })) };
+  await assert.rejects(buildGapsWorkbook({ file: path.join(dir, "b.xlsx"), report: bad, title: "t", runAt: "t", urls: run.urls }), /GAP-AVLN-1-S01 has no severity reasoning/);
+
+  const out = await buildWorkbook({ file: path.join(dir, "full.xlsx"), ...minimalRun() });
+  assert.deepEqual(out.sheets, ["Summary", ...Object.values((await import("../scripts/lib/workbook.mjs")).SHEETS)]);
 });

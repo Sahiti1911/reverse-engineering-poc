@@ -137,7 +137,7 @@ try {
       console.log("No stories in scope — nothing to analyse.");
       process.exit(0);
     }
-    for (const stage of ["requirements", "code", "zephyr", "context", "draft", "validate"]) {
+    for (const stage of ["requirements", "code", "zephyr", "context", "draft", "validate", "gap-review"]) {
       await STAGE_FUNCS[stage](ctx);
       ctx.save();
     }

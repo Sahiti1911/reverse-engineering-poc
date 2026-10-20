@@ -21,6 +21,9 @@ import { applyScoutReview, applyRequirementsReview, applyCodeReview, applyUiRevi
 import { validateGap } from "./validate.mjs";
 import { needsDraft, designInput, normalizeSuite, checkCandidates, inheritedCheck, untracedScenarioGaps, designGap } from "./test-design.mjs";
 import { chunk, promisePool, truncate, hash, writeJson, readJson } from "./util.mjs";
+import { fieldsForStage, pickExtras } from "./output.mjs";
+import { collectGapItems, reviewInput, reviewSignature, applyGapReview, finalizeGapReport, buildGapsWorkbook } from "./gap-report.mjs";
+import { summarizeTokens } from "./tokens.mjs";
 
 const blankResult = (story, triage) => ({
   story, triage, dropped: null, linkCheck: null, expected: [], droppedScenarios: [], skippedUcs: [], flags: [],
@@ -233,6 +236,7 @@ export async function requirementsStage(ctx) {
           id: `${r.story.key}:S${String(n + 1).padStart(2, "0")}`, storyKey: r.story.key, source: "story", uc: "", flow: sc.flow, title: sc.title, type: sc.type,
           steps: sc.steps, expected: sc.expected, evidence: sc.evidence, priorityHint: sc.flow === "main" ? "High" : "Medium",
           codeOnly: false, reasoning: `${sc.reasoning} (LLM-derived from the story's ${r.triage.acSource === "ac-text" ? "acceptance criteria" : "description"}.)`,
+          ...pickExtras(sc, fieldsForStage(ctx.outputFields, "extract-ac")),
         }));
       }
       ctx.step("extract-ac", { batch: `batch ${i + 1}/${acBatches.length}`, in: batch.length, out: res.output ? res.output.stories.reduce((n, x) => n + x.scenarios.length, 0) : 0, notes: res.reused ? "served from cache" : res.output ? "extracted" : ctx.skipReason(res) });
@@ -308,6 +312,7 @@ export async function codeStage(ctx) {
         type: sc.type, steps: sc.steps, expected: sc.expected, evidence: sc.evidence, repo: fileRepo.get(sc.evidence.path) ?? files[0].repo,
         priorityHint: "Medium", codeOnly: true,
         reasoning: `${sc.reasoning} (Code-derived from ${sc.evidence.path}: code shows what the system does, so confirm it is intended before treating it as a requirement.${group.length > 1 ? ` Module shared by ${group.map((r) => r.story.key).join(", ")}; attached to ${primary.story.key}.` : ""})`,
+        ...pickExtras(sc, fieldsForStage(ctx.outputFields, "extract-code")),
       }));
       ctx.step("extract-code", { batch: featurePath, in: files.length, out: res.output.scenarios.length, notes: `${res.reused ? "served from cache" : "extracted"}; ${files.filter((f) => f.role !== "map").length} files + implementation map. ${notes.join("; ")}` });
     } catch (err) {
@@ -649,7 +654,63 @@ export async function validateStage(ctx) {
   ctx.markDone("validate");
 }
 
-// ---------------------------------------------------------------- 8. report
+/** Jira, Zephyr and code links of a run (code links pin the analysed commit). */
+function runUrls(ctx) {
+  const repoInfos = repoInfosFor(ctx, { checkout: false });
+  return {
+    jira: (key) => ctx.jira.browseUrl(key),
+    zephyr: (key) => caseUrl(ctx.profile, key),
+    code: (repoName, filePath) => {
+      const x = repoInfos.get(repoName);
+      return x ? codeUrl(x.repo, x.info.commit, filePath) : null;
+    },
+  };
+}
+
+/** Agent runs only: every agent's handoff, review file and UI evidence. */
+function agentResultsFor(ctx, handoffs = ctx.handoffs()) {
+  return handoffs.length
+    ? collectAgentResults({ runDir: ctx.runDir, agents: resolvePipeline(ctx.cfg).flatMap((p) => p.agents), handoffs, runLog: ctx.state.runLog })
+    : null;
+}
+
+// ---------------------------------------------------------------- 8. gap review (gaps workbook)
+/**
+ * Severity for every gap, and type, wording and suggested fix for the requirement gaps (prompts/gap-review.md).
+ * Stored per gap with the gap's signature, so the report applies a review only to the gap it was made for.
+ */
+export async function gapReviewStage(ctx) {
+  const { cfg, state } = ctx;
+  const zephyr = await ctx.zephyr();
+  applyDraftsReview(ctx, new Map(zephyr.folders.map((f) => [f.id, f.path])));
+  applyValidationReview(ctx);
+  const items = collectGapItems({ stories: ctx.stories, moduleContext: state.moduleContext ?? null, ui: agentResultsFor(ctx)?.ui ?? null, urls: runUrls(ctx) });
+  const module = state.scope?.moduleFilter ?? null;
+  const reviews = {};
+  await promisePool(chunk(items, cfg.batch?.["gap-review"] ?? 40), ctx.concurrency, async (batch, i) => {
+    const input = batch.map(reviewInput);
+    const label = `batch ${i + 1}`;
+    try {
+      const res = await ctx.llmRun("gap-review", {
+        cacheKey: `gap-review-${hash(batch.map((x) => x.id))}`, fingerprint: input, prompt: JSON.stringify({ module, items: input }),
+        jiraKeys: [...new Set(batch.map((x) => x.story).filter(Boolean))], module, itemsIn: batch.length, countOut: (o) => o.items.length,
+      });
+      if (!res.output) { ctx.step("gap-review", { batch: label, in: batch.length, skipped: `${ctx.skipReason(res)}; severity falls back to rules` }); return; }
+      for (const it of batch) {
+        const o = res.output.items.find((x) => x.id === it.id);
+        if (o) reviews[it.id] = { ...o, sig: reviewSignature(it) };
+      }
+      const dropped = batch.filter((it) => reviews[it.id]?.keep === false && it.category === "Requirement").length;
+      ctx.step("gap-review", { batch: label, in: batch.length, out: batch.filter((it) => reviews[it.id]).length, notes: `${res.reused ? "served from cache" : "reviewed"}; ${dropped} requirement candidate(s) dropped as noise.` });
+    } catch (err) {
+      ctx.step("gap-review", { batch: label, in: batch.length, errors: `${err.message.slice(0, 300)}; severity falls back to rules` });
+    }
+  });
+  state.gapReview = { reviews };
+  ctx.markDone("gap-review");
+}
+
+// ---------------------------------------------------------------- 9. report
 export async function reportStage(ctx, { out } = {}) {
   const { profile, cfg, state } = ctx;
   const zephyr = await ctx.zephyr();
@@ -685,25 +746,30 @@ export async function reportStage(ctx, { out } = {}) {
     writeJson(path.join(ctx.runDir, "stories", `${r.story.key}.json`), { ...r, story: { ...r.story, descriptionHtml: undefined, links: undefined } });
   }
 
-  const repoInfos = repoInfosFor(ctx, { checkout: false });
-  const urls = {
-    jira: (key) => ctx.jira.browseUrl(key),
-    zephyr: (key) => caseUrl(profile, key),
-    code: (repoName, filePath) => {
-      const x = repoInfos.get(repoName);
-      return x ? codeUrl(x.repo, x.info.commit, filePath) : null;
-    },
-  };
+  const urls = runUrls(ctx);
   const ordered = [...ctx.stories].sort((a, b) => a.story.module.localeCompare(b.story.module) || a.story.key.localeCompare(b.story.key));
   const handoffs = ctx.handoffs();
   // Agent runs only: every agent's handoff, review file and UI evidence, for the workbook and the JSON files.
-  const agentResults = handoffs.length
-    ? collectAgentResults({ runDir: ctx.runDir, agents: resolvePipeline(cfg).flatMap((p) => p.agents), handoffs, runLog: state.runLog })
-    : null;
+  const agentResults = agentResultsFor(ctx, handoffs);
   const moduleContext = state.moduleContext ?? null;
   if (moduleContext) writeModuleContext(ctx.runDir, moduleContext, { title: `Module context — ${scope.moduleFilter ?? scope.value ?? ""}` });
   const run = runHeader({ runDir: ctx.runDir, state, profile });
-  const files = runFiles({ runDir: ctx.runDir, workbookPath, agentRun: !!agentResults, hasContext: !!moduleContext, hasUi: !!agentResults?.ui });
+  // The gaps workbook: gaps + supporting evidence only, next to the full workbook (config output.gapsWorkbook).
+  const gapsPath = cfg.output?.gapsWorkbook === false ? null
+    : out ? workbookPath.replace(/(\.xlsx)?$/i, "_gaps.xlsx") : path.join(ctx.runDir, `gaps_${profile.name}_${scope.slug}.xlsx`);
+  let gapReport = null;
+  if (gapsPath) {
+    const items = collectGapItems({ stories: ordered, moduleContext, ui: agentResults?.ui ?? null, urls });
+    const { kept, dropped } = applyGapReview(items, state.gapReview?.reviews);
+    gapReport = { ...finalizeGapReport(kept), dropped: dropped.map(({ refs, ...d }) => d) };
+    const byRule = kept.filter((i) => i.reviewedBy === "rule").length;
+    ctx.step("gaps-workbook", {
+      in: items.length, out: kept.length,
+      notes: `${kept.filter((i) => i.category === "Requirement").length} requirement and ${kept.filter((i) => i.category === "Test case").length} test-case gap(s); ${gapReport.evidence.length} evidence row(s).${byRule ? ` ${byRule} without a current gap-review (severity by rule).` : ""}`,
+      skipped: dropped.map((d) => `${d.id} ${d.title}: ${d.dropReasoning}`).join("\n"),
+    });
+  }
+  const files = runFiles({ runDir: ctx.runDir, workbookPath, gapsPath, agentRun: !!agentResults, hasContext: !!moduleContext, hasUi: !!agentResults?.ui });
   if (agentResults) writeJson(path.join(ctx.runDir, "agents.json"), agentsJson({ run, files, agents: agentResults.agents }));
   const runInfo = {
     runAt: state.runAt, zephyrExportedAt: state.zephyrExportedAt ?? zephyr.exportedAt, codeCommits: state.codeCommits.join(", "),
@@ -714,18 +780,37 @@ export async function reportStage(ctx, { out } = {}) {
   ctx.save();
   let built;
   try {
-    built = await buildWorkbook({ file: workbookPath, profile, scope, stories: ordered, zephyr, tokenRecords: ctx.tokenLog.records, runLog: state.runLog, runInfo, urls, handoffs, agentResults, moduleContext, testDesign: state.testDesign ?? null });
+    built = await buildWorkbook({ file: workbookPath, profile, scope, stories: ordered, zephyr, tokenRecords: ctx.tokenLog.records, runLog: state.runLog, runInfo, urls, handoffs, agentResults, moduleContext, testDesign: state.testDesign ?? null, output: cfg.output });
   } catch (err) {
     if (err.code === "EBUSY") throw new Error(`${workbookPath} is open in another program (Excel?). Close it and re-run the report stage; nothing else needs repeating.`);
     throw err;
   }
-  const summary = writeSummary({ ctx, built, workbookPath, handoffs, run, files });
+  if (gapsPath) {
+    try {
+      await buildGapsWorkbook({
+        file: gapsPath, report: gapReport, urls, runAt: state.runAt,
+        title: `Gaps — ${scope.moduleFilter ? `module ${scope.moduleFilter}` : `${scope.kind}${scope.value ? ` ${scope.value}` : ""}`} (profile ${profile.name})`,
+        tokens: summarizeTokens(ctx.tokenLog.records).byStage["gap-review"]?.total_tokens ?? 0,
+        storySummary: Object.fromEntries(ordered.map((r) => [r.story.key, r.story.summary])),
+        facts: [
+          ["Profile / Jira / Zephyr", `${profile.name} / ${profile.jira.projectKey} / ${profile.zephyr.projectKey}`],
+          ...(scope.moduleFilter ? [["Module / keywords", `${scope.moduleFilter} / ${scope.keywords.join(", ")}`]] : [["Scope", `${scope.kind}${scope.value ? ` ${scope.value}` : ""}`]]),
+          ["Stories in scope", `${ordered.length} (${ctx.testable().length} testable)`],
+          ["Full workbook", path.basename(workbookPath)],
+        ],
+      });
+    } catch (err) {
+      if (err.code === "EBUSY") throw new Error(`${gapsPath} is open in another program (Excel?). Close it and re-run the report stage; nothing else needs repeating.`);
+      throw err;
+    }
+  }
+  const summary = writeSummary({ ctx, built, workbookPath, handoffs, run, files, gaps: gapsPath && { path: gapsPath, items: gapReport.items } });
   const jsonPath = path.join(ctx.runDir, files.coverage);
-  writeJson(jsonPath, coverageJson({ run, files, counts: built.counts, moduleContext, testDesign: state.testDesign ?? null, ui: agentResults?.ui ?? null, stories: ordered }));
+  writeJson(jsonPath, coverageJson({ run, files, counts: built.counts, fields: ctx.outputFields, moduleContext, testDesign: state.testDesign ?? null, ui: agentResults?.ui ?? null, gapReport, stories: ordered }));
   // The baseline moves only when a real run finished without hitting the token budget.
   if (!ctx.dryRun && !state.budgetHit && scope.baselineKey) writeJson(baselineFile(profile.name), { ...readBaseline(profile.name), [scope.baselineKey]: state.runAt });
-  return { built, workbookPath, summaryPath: summary.file, jsonPath };
+  return { built, workbookPath, gapsPath, summaryPath: summary.file, jsonPath };
 }
 
-export const STAGE_FUNCS = { scope: scopeStage, requirements: requirementsStage, code: codeStage, zephyr: zephyrStage, context: contextStage, draft: draftStage, validate: validateStage, report: reportStage };
+export const STAGE_FUNCS = { scope: scopeStage, requirements: requirementsStage, code: codeStage, zephyr: zephyrStage, context: contextStage, draft: draftStage, validate: validateStage, "gap-review": gapReviewStage, report: reportStage };
 export { ROOT };

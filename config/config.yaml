@@ -101,6 +101,7 @@ models:
   design: claude-opus-5-5     # the module's full test suite, from the context-builder's module context
   check: claude-opus-5-5      # each designed case vs the existing Zephyr cases
   draft: claude-sonnet-5-5
+  gap-review: claude-sonnet-5-5   # severity + requirement-gap wording for the gaps workbook
 
 concurrency: 3
 
@@ -108,6 +109,7 @@ batch:
   triage: 40
   extract-ac: 6
   draft: 12
+  gap-review: 40
 
 limits:
   descriptionCharsTriage: 1200
@@ -145,3 +147,45 @@ zephyr:
 validation:
   # A draft whose name shares this share of words with an existing case is flagged as a possible duplicate.
   duplicateNameOverlap: 0.8
+
+# ---------------------------------------------------------------- output
+# What the run produces. Checked when a run starts, so a typo fails before any tokens are spent.
+output:
+  # Second workbook gaps_<profile>_<scope>.xlsx next to the full one: Gaps + Supporting Evidence only.
+  gapsWorkbook: true
+
+  # Extra fields Claude fills in on top of the built-in ones. Each one is added to its stage's schema and
+  # prompt (only that stage's cache is invalidated), and shown as its own column in the stage's sheet and in
+  # coverage.json.
+  #   name:        camelCase, e.g. riskLevel (must not clash with a built-in field)
+  #   stages:      extract-ac / extract-code → 4_Expected_Scenarios, match → 7_Matching,
+  #                design → 8_Test_Design, draft → 9_Gaps
+  #   description: what Claude is told to put in it
+  #   values:      optional, the allowed values; list: true for a list instead of one value
+  #   header:      optional column header (default: the name)
+  fields: []
+  #  - name: riskLevel
+  #    stages: [draft, design]
+  #    description: Business risk if this behaviour breaks in production, judged from the story and module context.
+  #    values: [Low, Medium, High]
+  #    header: Risk
+  #  - name: testData
+  #    stages: [extract-ac, extract-code]
+  #    description: Concrete data a tester needs to run this scenario (records, files, user roles), or "none".
+
+  workbook:
+    # Per sheet (by sheet name, e.g. 7_Matching, or without the number, e.g. Matching):
+    #   false              leave the sheet out (9_Gaps cannot be left out)
+    #   columns: [...]     only these columns, in this order (by header text)
+    #   hide: [...]        every column except these
+    #   rename: {old: new} change header text
+    # IDs and reasoning columns cannot be removed (each decision row must say why). In 9_Gaps, the
+    # columns create-approved reads cannot be removed or renamed. Extra fields are columns like any other.
+    sheets: {}
+    #  13_Run_Log: false
+    #  14_Token_Usage: false
+    #  7_Matching:
+    #    columns: [Expected ID, Story, Scenario, Verdict, Confidence, Matched case(s), Match reasoning]
+    #    rename: { Match reasoning: Why }
+    #  4_Expected_Scenarios:
+    #    hide: [Priority hint, Module]

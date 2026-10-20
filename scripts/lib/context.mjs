@@ -4,12 +4,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { ROOT, loadRunConfig, loadProfile } from "./config.mjs";
 import { createLlm, BudgetExceeded } from "./llm.mjs";
+import { checkOutputConfig } from "./workbook.mjs";
 import { TokenLog } from "./tokens.mjs";
 import { readJson, writeJson, nowIso } from "./util.mjs";
 import { exportZephyr } from "./zephyr.mjs";
 import { createJiraClient } from "./jira.mjs";
 
-export const STAGES = ["scope", "requirements", "code", "zephyr", "context", "draft", "validate", "report"];
+export const STAGES = ["scope", "requirements", "code", "zephyr", "context", "draft", "validate", "gap-review", "report"];
 
 export class RunContext {
   constructor({ runDir, state, profile, cfg, opts = {}, freshTokens = false }) {
@@ -22,9 +23,11 @@ export class RunContext {
     this.concurrency = Number(opts.concurrency ?? cfg.concurrency ?? 2);
     this.cacheDir = path.join(ROOT, "cache", profile.name);
     this.tokenLog = new TokenLog(path.join(runDir, "token_log.jsonl"), { fresh: freshTokens });
+    // config output: checked here so a typo fails before any tokens are spent.
+    this.outputFields = checkOutputConfig(cfg.output);
     this.llm = createLlm({
       runCfg: cfg, cacheDir: this.cacheDir, tokenLog: this.tokenLog, force: opts.force, dryRun: this.dryRun,
-      extraSystem: { draft: profile.conventionsText },
+      extraSystem: { draft: profile.conventionsText }, fields: this.outputFields,
     });
     this._zephyr = null;
     this.jira = createJiraClient({ baseUrl: profile.jira.baseUrl, email: process.env.ATLASSIAN_EMAIL ?? "", token: process.env.ATLASSIAN_API_TOKEN ?? "" });

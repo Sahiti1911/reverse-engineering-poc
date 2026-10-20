@@ -31,6 +31,8 @@ export function loadRunConfig(file = CONFIG_FILE) {
   cfg.scope ??= {};
   cfg.agents ??= {};
   cfg.validation ??= {};
+  // Older configs have no gap-review model; it does the same kind of work as draft.
+  if (cfg.models && !cfg.models["gap-review"]) cfg.models["gap-review"] = cfg.models.draft;
   return cfg;
 }
 

@@ -90,6 +90,33 @@
       "includeStories": [],
       "excludeStories": [],
       "notes": "Cross-cutting CSV/Excel export used by every grid page: grid export button -> ExportJobService (services/export) -> backend ExportService creates an export job -> one Export*Handler per page (generic/handler/export) -> export-finish websocket message delivers the file. Not the Export Jobs admin page (export-job), which only lists those jobs."
+    },
+    "static gtfs export": {
+      "path": "static-gtfs-export",
+      "crossCutting": true,
+      "focusPattern": "gtfs.*(static|export)|export.*gtfs",
+      "codePaths": [
+        "gtms-vps/src/main/java/com/lecip/tms/generic/handler/gtfs/common/zip/write",
+        "gtms-vps/src/main/java/com/lecip/tms/generic/handler/gtfs/v1/zip/write",
+        "gtms-vps/src/main/java/com/lecip/tms/generic/timers/gtfs",
+        "gtms-vps/src/main/java/com/lecip/tms/generic/rest/api/v1/gtfs",
+        "gtms-vps/src/main/java/com/lecip/tms/generic/handler/deploy/module",
+        "gtms-vps/src/main/java/com/lecip/tms/generic/handler/gtfs/common/executorService"
+      ],
+      "aliases": [
+        "static gtfs export"
+      ],
+      "keywords": [
+        "gtfs export",
+        "gtfs static",
+        "GtfsExport",
+        "export static feed",
+        "force export"
+      ],
+      "zephyrFolder": "GTFS Export",
+      "includeStories": [],
+      "excludeStories": [],
+      "notes": "Proposed by scripts/vocab.mjs on 2026-10-20; codePaths, keywords, zephyrFolder and focusPattern corrected by the user (static GTFS export, not Realtime)."
     }
   }
 }
