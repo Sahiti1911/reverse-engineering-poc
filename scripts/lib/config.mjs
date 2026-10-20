@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import Ajv from "ajv";
+import YAML from "yaml";
 import { readJson } from "./util.mjs";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -21,14 +22,22 @@ export function requireEnv(...names) {
   return Object.fromEntries(names.map((n) => [n, process.env[n]]));
 }
 
-export function loadRunConfig(file = path.join(ROOT, "config", "run.json")) {
-  return readJson(file);
+export const CONFIG_FILE = path.join(ROOT, "config", "config.yaml");
+
+/** config/config.yaml: pipeline, environments, scope filters, agent options and stage tuning. */
+export function loadRunConfig(file = CONFIG_FILE) {
+  if (!fs.existsSync(file)) throw new Error(`Missing ${path.relative(ROOT, file)} (the run configuration).`);
+  const cfg = YAML.parse(fs.readFileSync(file, "utf8")) ?? {};
+  cfg.scope ??= {};
+  cfg.agents ??= {};
+  cfg.validation ??= {};
+  return cfg;
 }
 
-/** --profile is optional when config/run.json has a defaultProfile. */
+/** --profile is optional when config/config.yaml has a defaultProfile. */
 export function profileName(name) {
   const resolved = name ?? loadRunConfig().defaultProfile;
-  if (!resolved) throw new Error("No --profile given and no defaultProfile in config/run.json");
+  if (!resolved) throw new Error("No --profile given and no defaultProfile in config/config.yaml");
   return resolved;
 }
 

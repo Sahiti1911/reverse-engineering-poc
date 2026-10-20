@@ -15,12 +15,16 @@
         "additionalProperties": false,
         "properties": {
           "path": { "type": "string", "description": "Code module path under the frontend root, e.g. admin/import-job (see: node scripts/modules.mjs)." },
+          "codePaths": { "type": "array", "items": { "type": "string" }, "description": "Repo-relative folders or files that are this module's own code, read in addition to <frontendRoot>/<path>. Use for shared features that live outside the feature folders (e.g. the grid export service). With codePaths, <path> may be a name that has no folder." },
+          "crossCutting": { "type": "boolean", "description": "A feature used on many pages (e.g. grid export). Stories whose QA doc belongs to another page are kept when they mention a keyword, and only the use cases of that doc that mention a keyword are analysed." },
+          "focusPattern": { "type": "string", "description": "Cross-cutting modules: regex (case-insensitive) for the feature's core term, e.g. \"\\\\bexport\". Another page's UC is kept whole when its title matches, narrowed to the matching steps/flows otherwise; that page's free-text scenarios are kept only when they match. Default: the word most keywords share." },
           "aliases": { "type": "array", "items": { "type": "string" }, "description": "Other names that should pick this module, e.g. \"bundle import\"." },
           "keywords": { "type": "array", "items": { "type": "string" }, "description": "Words that Jira stories about this module contain. Used for the Jira search and to assign stories to the module. Avoid words that also name customers/projects." },
           "zephyrFolder": { "type": "string", "description": "Folder path (or part of it) where new test cases for this module belong, e.g. \"Bundle Import\"." },
           "includeStories": { "type": "array", "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*-\\d+$" }, "description": "Stories that always belong to the module, even without a keyword hit." },
           "excludeStories": { "type": "array", "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*-\\d+$" }, "description": "Stories never analysed for this module (noise)." },
           "jql": { "type": "string", "description": "Optional full JQL that replaces the keyword search." },
+          "uiRoutes": { "type": "array", "items": { "type": "string" }, "description": "Paths of the module's screens relative to the environment's uiBaseUrl (e.g. \"/admin/import-job\"). Without them the ui-explorer finds the route in the frontend code." },
           "notes": { "type": "string", "description": "Anything the agents should know about this module." }
         }
       }

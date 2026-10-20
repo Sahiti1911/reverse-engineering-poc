@@ -1,0 +1,84 @@
+{
+  "type": "object",
+  "properties": {
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "tcId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "storyKey": {
+            "type": "string"
+          },
+          "basis": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scenarioIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "flow": {
+            "enum": [
+              "main",
+              "alt",
+              "exception"
+            ]
+          },
+          "type": {
+            "enum": [
+              "positive",
+              "negative",
+              "boundary",
+              "permission",
+              "validation",
+              "integration"
+            ]
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expected": {
+            "type": "string"
+          },
+          "whyNeeded": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tcId",
+          "title",
+          "storyKey",
+          "basis",
+          "scenarioIds",
+          "flow",
+          "type",
+          "steps",
+          "expected",
+          "whyNeeded"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "cases",
+    "notes"
+  ],
+  "additionalProperties": false
+}

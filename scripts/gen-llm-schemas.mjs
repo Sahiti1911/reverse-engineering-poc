@@ -37,6 +37,25 @@ const schemas = {
     })),
     orphans: arr(obj({ key: str, reasoning: str })),
   }),
+  design: obj({
+    cases: arr(obj({
+      tcId: str, title: str, storyKey: str,
+      basis: strArr, scenarioIds: strArr,
+      flow, type, steps: strArr, expected: str,
+      whyNeeded: str,
+    })),
+    notes: str,
+  }),
+  check: obj({
+    results: arr(obj({
+      tcId: str,
+      verdict: { enum: ["Covered", "Partial", "Missing"] },
+      matchedKeys: strArr,
+      confidence: { enum: ["High", "Medium", "Low"] },
+      missingAspects: str,
+      reasoning: str,
+    })),
+  }),
   draft: obj({
     drafts: arr(obj({
       gapId: str,

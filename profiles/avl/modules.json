@@ -3,21 +3,93 @@
   "modules": {
     "import job": {
       "path": "admin/import-job",
-      "aliases": ["bundle import", "data bundle", "import jobs", "importjob"],
-      "keywords": ["import job", "importjob", "tms.admin.importjob", "bundle import", "reimport"],
+      "aliases": [
+        "bundle import",
+        "data bundle",
+        "import jobs",
+        "importjob"
+      ],
+      "keywords": [
+        "import job",
+        "importjob",
+        "tms.admin.importjob",
+        "bundle import",
+        "reimport"
+      ],
       "zephyrFolder": "Bundle Import",
-      "includeStories": ["AVLN-2398"],
+      "includeStories": [
+        "AVLN-2398"
+      ],
       "excludeStories": [],
       "notes": "AVLN-2398 is the QA story with the UC doc (calibration); AVLN-2363 is its dev story."
     },
     "conductor": {
       "path": "admin/conductor",
-      "aliases": ["conductors", "conductor page"],
-      "keywords": ["conductor page", "tms.admin.conductor", "conductor dialog", "conductors"],
+      "aliases": [
+        "conductors",
+        "conductor page"
+      ],
+      "keywords": [
+        "conductor page",
+        "tms.admin.conductor",
+        "conductor dialog",
+        "conductors"
+      ],
       "zephyrFolder": "Conductors",
-      "includeStories": ["AVLN-2390", "AVLN-2316"],
-      "excludeStories": ["AVLN-282", "AVLN-284", "AVLN-458", "AVLN-1030", "AVLN-1165", "AVLN-1186", "AVLN-1199", "AVLN-1202", "AVLN-1215", "AVLN-1266", "AVLN-1528", "AVLN-1849", "AVLN-4276"],
+      "includeStories": [
+        "AVLN-2390",
+        "AVLN-2316"
+      ],
+      "excludeStories": [
+        "AVLN-282",
+        "AVLN-284",
+        "AVLN-458",
+        "AVLN-1030",
+        "AVLN-1165",
+        "AVLN-1186",
+        "AVLN-1199",
+        "AVLN-1202",
+        "AVLN-1215",
+        "AVLN-1266",
+        "AVLN-1528",
+        "AVLN-1849",
+        "AVLN-4276"
+      ],
       "notes": "\"Conductor\" is also the name of an EU customer project; stories about its environments are not about this page."
+    },
+    "grid export": {
+      "path": "shared/grid-export",
+      "crossCutting": true,
+      "focusPattern": "\\bexport",
+      "aliases": [
+        "data export",
+        "grid data export",
+        "csv export",
+        "excel export",
+        "export to csv",
+        "export to excel",
+        "grid csv export"
+      ],
+      "codePaths": [
+        "gtms-vps/frontend/src/app/services/export",
+        "gtms-vps/frontend/src/app/components/avl-grid/grid/grid.component.ts",
+        "gtms-vps/frontend/src/app/core/websocket/consumers/export-finish.consumer.ts",
+        "gtms-vps/src/main/java/com/lecip/tms/generic/rest/export"
+      ],
+      "keywords": [
+        "grid export",
+        "data export",
+        "export to csv",
+        "export to excel",
+        "csv export",
+        "excel export",
+        "export button",
+        "exportformatter"
+      ],
+      "zephyrFolder": "Data Export (grid Export)",
+      "includeStories": [],
+      "excludeStories": [],
+      "notes": "Cross-cutting CSV/Excel export used by every grid page: grid export button -> ExportJobService (services/export) -> backend ExportService creates an export job -> one Export*Handler per page (generic/handler/export) -> export-finish websocket message delivers the file. Not the Export Jobs admin page (export-job), which only lists those jobs."
     }
   }
 }

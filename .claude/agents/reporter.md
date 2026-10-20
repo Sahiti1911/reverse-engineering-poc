@@ -1,6 +1,6 @@
 ---
 name: reporter
-description: Last agent of the coverage chain. Reads the finished coverage report and writes a short executive summary for the user. Use after test-designer.
+description: Last agent of the coverage pipeline. Reads the finished coverage report and writes a short executive summary for the user.
 tools: Read, Glob, Grep, Bash, StructuredOutput
 model: haiku
 ---

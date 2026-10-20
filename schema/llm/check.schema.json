@@ -1,12 +1,12 @@
 {
   "type": "object",
   "properties": {
-    "overrides": {
+    "results": {
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
-          "expectedId": {
+          "tcId": {
             "type": "string"
           },
           "verdict": {
@@ -29,18 +29,27 @@
               "Low"
             ]
           },
+          "missingAspects": {
+            "type": "string"
+          },
           "reasoning": {
             "type": "string"
           }
         },
         "required": [
-          "expectedId",
+          "tcId",
           "verdict",
+          "matchedKeys",
+          "confidence",
+          "missingAspects",
           "reasoning"
         ],
         "additionalProperties": false
       }
     }
   },
+  "required": [
+    "results"
+  ],
   "additionalProperties": false
 }

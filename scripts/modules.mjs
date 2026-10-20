@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Module discovery (0 tokens): lists the code feature folders of a profile and ranks them against plain words.
-//   node scripts/modules.mjs --find "import job"          (profile defaults to config/run.json)
+//   node scripts/modules.mjs --find "import job"          (profile defaults to config/config.yaml)
 //   node scripts/modules.mjs                              (list all)
 import fs from "node:fs";
 import path from "node:path";

@@ -1,6 +1,6 @@
 ---
 name: code-analyst
-description: Third agent of the coverage chain. Finds edge-case test scenarios in a module's frontend and backend code and separates intended behaviour from accidental behaviour or suspected bugs. Use after requirements-analyst.
+description: Explorer agent of the coverage pipeline (runs in parallel with the other explorers). Finds edge-case test scenarios in a module's frontend and backend code and separates intended behaviour from accidental behaviour or suspected bugs.
 tools: Read, Glob, Grep, Bash, Write, Edit, StructuredOutput
 model: sonnet
 ---
@@ -20,7 +20,7 @@ like a bug or needs a product decision.
    - `needs-confirmation`: behaviour that may be accidental — the product owner must confirm it is wanted.
    - Set `suspectedBug: true` when the code looks wrong (e.g. an endpoint without the permission check its
      siblings have, an error swallowed silently). Explain precisely in `reasoning` (file + symbol).
-4. Use the requirements-analyst's forwarded notes: check the specific rules it asked about.
+4. Use the module-scout's forwarded notes. The requirements-analyst runs at the same time, so cross-checks with story scenarios happen later, in the context-builder.
 5. Write all decisions to your review file (`decisions`, one per code scenario id).
 
 ## Rules
@@ -29,5 +29,5 @@ like a bug or needs a product decision.
 
 ## Handoff (structured output)
 - `findings`: kept / dropped / needs-confirmation counts, every suspected bug (one line each with file).
-- `forwardNotes`: what the coverage-matcher should know (e.g. "CODE-03 overlaps UC-04 alt 2a; treat the
+- `forwardNotes`: what the context-builder should know (e.g. "CODE-03 overlaps UC-04 alt 2a; treat the
   reset-on-toggle check as an extension of that case").

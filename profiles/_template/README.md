@@ -15,4 +15,5 @@
 5. Optional but recommended: `modules.json` — the names you use for modules, their code path, Jira keywords,
    Zephyr folder and stories to always include/exclude (schema: `schema/modules.schema.json`). Then
    `node scripts/agents.mjs --profile <name> --module "<your name>"` uses it instead of guessing.
-6. To make the profile the default (no `--profile` needed), set `defaultProfile` in `config/run.json`.
+6. To make the profile the default (no `--profile` needed), set `defaultProfile` in `config/config.yaml`. For UI exploration add an
+   environment under `environments` there (and `uiRoutes` per module in `modules.json` if you know them).

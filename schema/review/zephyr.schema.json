@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "properties": {
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "storyKey": { "type": "string" },
+          "add": { "type": "array", "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*-T[0-9]+$" } },
+          "remove": { "type": "array", "items": { "type": "string" } },
+          "reasoning": { "type": "string" }
+        },
+        "required": ["storyKey", "reasoning"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

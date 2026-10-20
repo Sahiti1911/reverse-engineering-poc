@@ -1,0 +1,426 @@
+<title>Context-First Test Design</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column, same system as the Coverage Gap POC Map; the flow diagram breaks out wider and scrolls sideways on phones. */
+:root {
+  --bg: #f5f7f8; --fg: #1b2a30; --muted: #5b6c73; --line: #cdd6da;
+  --lane: #e8eef0; --agent: #dff1ee; --agent-edge: #2d8a7d;
+  --new: #a8620a; --new-bg: #fbefdc; --danger: #c23a26; --danger-bg: #fbe5e1;
+  --ok: #2f7a3e; --ok-bg: #e2f2e5;
+  --display: "IBM Plex Sans Condensed", "Arial Narrow", sans-serif;
+  --body: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12191c; --fg: #e3eaec; --muted: #93a4ab; --line: #34444a;
+  --lane: #1c272b; --agent: #173733; --agent-edge: #4fc0ae;
+  --new: #f0aa4a; --new-bg: #3a2a12; --danger: #ff7a63; --danger-bg: #42201a;
+  --ok: #7fd18f; --ok-bg: #1a3320; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #12191c; --fg: #e3eaec; --muted: #93a4ab; --line: #34444a;
+  --lane: #1c272b; --agent: #173733; --agent-edge: #4fc0ae;
+  --new: #f0aa4a; --new-bg: #3a2a12; --danger: #ff7a63; --danger-bg: #42201a;
+  --ok: #7fd18f; --ok-bg: #1a3320; color-scheme: dark }
+
+body { background: var(--bg); color: var(--fg); font: 15px/1.55 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 32px 64px; }
+main { max-width: 1220px; margin: 0 auto; display: grid; gap: 44px; }
+.prose { max-width: 72ch; }
+h1, h2 { font-family: var(--display); font-weight: 600; text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: 2.1rem; }
+h2 { font-size: 1.45rem; margin-bottom: 10px; }
+p { margin: 0 0 10px; }
+.eyebrow { font: 500 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+code { font: 0.86em var(--mono); background: var(--lane); padding: 1px 5px; border-radius: 3px; }
+section { display: grid; gap: 12px; min-width: 0; }
+
+figure { margin: 0; min-width: 0; }
+.scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+.scroll svg { display: block; min-width: 900px; width: 100%; max-width: 1100px; height: auto; margin: 0 auto; }
+figcaption { color: var(--muted); font-size: 13.5px; margin-top: 10px; max-width: 80ch; }
+
+svg text { fill: var(--fg); font-family: var(--body); font-size: 12px; }
+svg .t-name { font-weight: 600; font-size: 13.5px; }
+svg .t-sub { fill: var(--muted); font-size: 11.5px; }
+svg .t-mono { font-family: var(--mono); font-size: 10.5px; fill: var(--fg); }
+svg .t-lane { font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em; fill: var(--muted); }
+svg .t-llm { fill: var(--new); font-weight: 500; font-size: 11px; }
+svg .t-danger { fill: var(--danger); font-weight: 600; font-size: 11px; }
+svg .t-ok { fill: var(--ok); font-weight: 600; font-size: 13.5px; }
+svg .t-warn { fill: var(--new); font-weight: 600; font-size: 13.5px; }
+svg .t-miss { fill: var(--danger); font-weight: 600; font-size: 13.5px; }
+svg .s-new { font-family: var(--mono); font-size: 10.5px; font-weight: 500; fill: var(--new); }
+svg .s-ext { font-family: var(--mono); font-size: 10.5px; font-weight: 500; fill: var(--agent-edge); }
+svg .s-reuse { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); }
+svg .lane { fill: var(--lane); }
+svg .lane-new { fill: none; stroke: var(--new); stroke-width: 1.2; stroke-dasharray: 6 5; }
+svg .box-reuse { fill: var(--bg); stroke: var(--muted); stroke-width: 1.2; }
+svg .box-ext { fill: var(--agent); stroke: var(--agent-edge); stroke-width: 1.4; }
+svg .box-new { fill: var(--new-bg); stroke: var(--new); stroke-width: 1.6; }
+svg .box-src { fill: var(--bg); stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 3; }
+svg .box-ok { fill: var(--ok-bg); stroke: var(--ok); stroke-width: 1.3; }
+svg .box-warn { fill: var(--new-bg); stroke: var(--new); stroke-width: 1.3; }
+svg .box-miss { fill: var(--danger-bg); stroke: var(--danger); stroke-width: 1.3; }
+svg .box-danger { fill: var(--danger-bg); stroke: var(--danger); stroke-width: 1.4; }
+svg .ar { stroke: var(--fg); stroke-width: 1.3; fill: none; }
+svg .ar-muted { stroke: var(--muted); stroke-width: 1.1; fill: none; stroke-dasharray: 4 3; }
+svg .ar-loop { stroke: var(--new); stroke-width: 1.4; stroke-dasharray: 5 4; fill: none; }
+svg .ar-danger { stroke: var(--danger); stroke-width: 2; fill: none; }
+svg .head { fill: var(--fg); }
+svg .head-muted { fill: var(--muted); }
+svg .head-new { fill: var(--new); }
+svg .head-danger { fill: var(--danger); }
+
+.legend { display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 13px; color: var(--muted); margin-top: 10px; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.sw { width: 22px; height: 12px; border-radius: 2px; display: inline-block; }
+.sw.reuse { background: var(--bg); border: 1.2px solid var(--muted); }
+.sw.ext { background: var(--agent); border: 1.4px solid var(--agent-edge); }
+.sw.new { background: var(--new-bg); border: 1.6px solid var(--new); }
+.sw.danger { background: var(--danger-bg); border: 1.4px solid var(--danger); }
+.dash { width: 26px; border-top: 2px dashed var(--new); display: inline-block; }
+
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; }
+table { border-collapse: collapse; width: 100%; min-width: 860px; font-size: 13.5px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+th { font: 500 11.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--lane); }
+tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 600; white-space: nowrap; }
+td ul { margin: 0; padding-left: 18px; }
+td li { margin-bottom: 3px; }
+.pill { font: 500 11px var(--mono); padding: 2px 7px; border-radius: 3px; white-space: nowrap; }
+.pill.new { color: var(--new); background: var(--new-bg); }
+.pill.ext { color: var(--agent-edge); background: var(--agent); }
+.pill.reuse { color: var(--muted); background: var(--lane); }
+
+/* Example designed case: a record card, two columns of field / value. */
+.record { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; max-width: 900px; }
+.record header { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; padding: 12px 16px; background: var(--lane); border-bottom: 1px solid var(--line); }
+.record header b { font: 600 13px var(--mono); }
+.record header span { font-weight: 600; }
+.record dl { margin: 0; display: grid; grid-template-columns: minmax(110px, 160px) 1fr; }
+.record dt, .record dd { margin: 0; padding: 9px 16px; border-bottom: 1px solid var(--line); min-width: 0; font-size: 13.5px; }
+.record dt { font: 500 11.5px var(--mono); letter-spacing: .04em; color: var(--muted); padding-top: 11px; }
+.record dd ol { margin: 0; padding-left: 18px; }
+.record .split { grid-column: 1 / -1; padding: 6px 16px; font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); background: var(--lane); border-bottom: 1px solid var(--line); }
+.verdict { font: 600 12px var(--mono); padding: 2px 8px; border-radius: 3px; color: var(--danger); background: var(--danger-bg); }
+@media (max-width: 520px) { .record dl { grid-template-columns: 1fr; } .record dt { padding-bottom: 0; border-bottom: 0; } }
+
+.sheets { display: flex; flex-wrap: wrap; gap: 8px; }
+.sheets span { font: 500 12.5px var(--mono); padding: 6px 10px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); }
+.sheets span.hl { color: var(--new); border-color: var(--new); background: var(--new-bg); font-weight: 600; }
+.sheets span.rv { color: var(--fg); border-color: var(--fg); font-weight: 600; }
+
+.questions { margin: 0; padding-left: 20px; display: grid; gap: 8px; max-width: 80ch; }
+.questions b { font-weight: 600; }
+
+.changes { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.changes div { padding: 14px 16px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); min-width: 0; }
+.changes h3 { font-size: 14px; margin: 0 0 6px; font-weight: 600; }
+.changes p { font-size: 13.5px; color: var(--muted); margin: 0; }
+.changes code { overflow-wrap: anywhere; }
+
+.rules { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.rules li { padding: 10px 14px; border-left: 3px solid var(--danger); background: var(--danger-bg); border-radius: 0 4px 4px 0; font-size: 14px; }
+</style>
+
+<main>
+  <header class="prose">
+    <div class="eyebrow">Reverse_engineering_poc · branch feature/new-implementation · draft stage</div>
+    <h1>Context-First Test Design</h1>
+    <p style="margin-top:12px">Test cases are now designed from the module context that the context-builder writes, not one gap at a time. The draft stage first writes the full set of tests the module should have. Then it checks each one against the existing Zephyr cases and drafts only the ones nobody covers. Every gap says which rule or workflow needs it and why no existing case tests it.</p>
+  </header>
+
+  <section>
+    <div class="prose">
+      <h2>New flow</h2>
+      <p>Scope, the four explorers and the context-builder are unchanged. The work happens inside the draft stage, before the test-designer agent starts: three Claude calls that the orchestrator runs as script steps.</p>
+    </div>
+    <figure>
+      <div class="scroll">
+        <svg viewBox="0 0 1100 1250" role="img" aria-label="Module-scout fans out to four explorers in parallel: requirements, code, UI and Zephyr. The context builder joins them into scenario verdicts and a module context. Inside the draft stage, the design call writes the full test suite from the module context, the check call compares each designed case with the existing Zephyr cases, and each case is Covered, Partial or Missing. Partial and Missing cases, plus scenario gaps no designed case picked up, are drafted. The test-designer fixes the drafts, the coverage validator sends duplicates or weak drafts back once, and the reporter writes the workbook with the new 8_Test_Design sheet and the 9_Gaps review sheet. Only approved rows are created in Zephyr.">
+          <defs>
+            <marker id="n" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head"/></marker>
+            <marker id="nm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head-muted"/></marker>
+            <marker id="nl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head-new"/></marker>
+            <marker id="nd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head-danger"/></marker>
+          </defs>
+
+          <!-- Scope -->
+          <text class="t-lane" x="20" y="40">SCOPE</text>
+          <rect class="box-reuse" x="380" y="20" width="340" height="84" rx="6"/>
+          <text class="t-name" x="550" y="44" text-anchor="middle">Scope agent</text>
+          <text class="t-sub" x="550" y="62" text-anchor="middle">Jira stories (+ Rovo) → keep / drop</text>
+          <text class="s-reuse" x="550" y="88" text-anchor="middle">module-scout</text>
+
+          <!-- fan-out -->
+          <path class="ar" d="M550,105 V128"/>
+          <path class="ar" d="M155,128 H935"/>
+          <path class="ar" d="M155,128 V155" marker-end="url(#n)"/>
+          <path class="ar" d="M415,128 V155" marker-end="url(#n)"/>
+          <path class="ar" d="M675,128 V155" marker-end="url(#n)"/>
+          <path class="ar" d="M935,128 V155" marker-end="url(#n)"/>
+          <text class="t-lane" x="20" y="150">EXPLORE · PARALLEL</text>
+
+          <!-- Explorers -->
+          <rect class="box-reuse" x="40" y="158" width="230" height="110" rx="6"/>
+          <text class="t-name" x="155" y="182" text-anchor="middle">Requirements</text>
+          <text class="t-sub" x="155" y="200" text-anchor="middle">AC + UC docs → scenarios</text>
+          <text class="t-mono" x="155" y="222" text-anchor="middle">→ requirements.json</text>
+          <text class="s-reuse" x="155" y="252" text-anchor="middle">requirements-analyst</text>
+
+          <rect class="box-reuse" x="300" y="158" width="230" height="110" rx="6"/>
+          <text class="t-name" x="415" y="182" text-anchor="middle">Code</text>
+          <text class="t-sub" x="415" y="200" text-anchor="middle">FE + BE rules, suspected bugs</text>
+          <text class="t-mono" x="415" y="222" text-anchor="middle">→ code.json</text>
+          <text class="s-reuse" x="415" y="252" text-anchor="middle">code-analyst</text>
+
+          <rect class="box-reuse" x="560" y="158" width="230" height="110" rx="6"/>
+          <text class="t-name" x="675" y="182" text-anchor="middle">UI</text>
+          <text class="t-sub" x="675" y="200" text-anchor="middle">Playwright · screens, texts</text>
+          <text class="t-mono" x="675" y="222" text-anchor="middle">→ ui.json</text>
+          <text class="s-reuse" x="675" y="252" text-anchor="middle">ui-explorer · read-only</text>
+
+          <rect class="box-reuse" x="820" y="158" width="230" height="110" rx="6"/>
+          <text class="t-name" x="935" y="182" text-anchor="middle">Zephyr</text>
+          <text class="t-sub" x="935" y="200" text-anchor="middle">linked, folder, keyword cases</text>
+          <text class="t-mono" x="935" y="222" text-anchor="middle">→ zephyr.json</text>
+          <text class="s-reuse" x="935" y="252" text-anchor="middle">zephyr-explorer</text>
+
+          <!-- merge -->
+          <path class="ar" d="M155,269 V296"/>
+          <path class="ar" d="M415,269 V296"/>
+          <path class="ar" d="M675,269 V296"/>
+          <path class="ar" d="M935,269 V296"/>
+          <path class="ar" d="M155,296 H935"/>
+          <path class="ar" d="M550,296 V321" marker-end="url(#n)"/>
+
+          <!-- Context builder -->
+          <text class="t-lane" x="20" y="344">CONTEXT</text>
+          <rect class="box-ext" x="250" y="324" width="600" height="100" rx="6"/>
+          <text class="t-name" x="550" y="348" text-anchor="middle">Context builder</text>
+          <text class="t-sub" x="550" y="366" text-anchor="middle">match (Claude) + agent: scenario verdicts Covered / Partial / Missing</text>
+          <text class="t-mono" x="550" y="388" text-anchor="middle">→ module context: screens · workflows · rules R-xx · APIs · UI texts · test data</text>
+          <text class="s-ext" x="550" y="412" text-anchor="middle">context-builder · its rules and workflows now drive test design</text>
+
+          <path class="ar" d="M550,425 V477" marker-end="url(#n)"/>
+
+          <!-- Draft stage lane -->
+          <rect class="lane" x="100" y="450" width="900" height="440" rx="8"/>
+          <rect class="lane-new" x="100" y="450" width="900" height="440" rx="8"/>
+          <text class="t-lane" x="116" y="470">DRAFT STAGE · SCRIPT STEPS + CLAUDE CALLS</text>
+          <text class="t-lane" x="984" y="470" text-anchor="end">NEW</text>
+
+          <!-- 1 design -->
+          <rect class="box-new" x="380" y="480" width="340" height="88" rx="6"/>
+          <text class="t-name" x="550" y="504" text-anchor="middle">① Design the full suite</text>
+          <text class="t-sub" x="550" y="522" text-anchor="middle">module context → every case the module should have</text>
+          <text class="t-mono" x="550" y="540" text-anchor="middle">TC-01 … TC-nn · basis R-xx / WF · whyNeeded</text>
+          <text class="s-new" x="550" y="558" text-anchor="middle">design · opus · 1 call</text>
+
+          <!-- side input: scenario verdicts -->
+          <rect class="box-src" x="770" y="490" width="200" height="66" rx="6"/>
+          <text class="t-name" x="870" y="514" text-anchor="middle">Scenario verdicts</text>
+          <text class="t-sub" x="870" y="532" text-anchor="middle">every Missing / Partial</text>
+          <text class="t-sub" x="870" y="547" text-anchor="middle">scenario must be traced</text>
+          <path class="ar-muted" d="M769,523 H723" marker-end="url(#nm)"/>
+
+          <path class="ar" d="M550,569 V591" marker-end="url(#n)"/>
+
+          <!-- 2 check -->
+          <rect class="box-new" x="380" y="594" width="340" height="84" rx="6"/>
+          <text class="t-name" x="550" y="618" text-anchor="middle">② Check against Zephyr</text>
+          <text class="t-sub" x="550" y="636" text-anchor="middle">only cases their scenarios don't already settle</text>
+          <text class="t-mono" x="550" y="652" text-anchor="middle">settled: keep the scenario verdict · 0 tokens</text>
+          <text class="s-new" x="550" y="670" text-anchor="middle">check · opus · 1 call per story</text>
+
+          <!-- side input: candidates -->
+          <rect class="box-src" x="130" y="604" width="200" height="66" rx="6"/>
+          <text class="t-name" x="230" y="628" text-anchor="middle">Existing cases</text>
+          <text class="t-sub" x="230" y="646" text-anchor="middle">story candidates + cases that</text>
+          <text class="t-sub" x="230" y="661" text-anchor="middle">matched its traced scenarios</text>
+          <path class="ar-muted" d="M331,637 H377" marker-end="url(#nm)"/>
+
+          <!-- branches -->
+          <path class="ar" d="M550,679 V700"/>
+          <path class="ar" d="M230,700 H870"/>
+          <path class="ar" d="M230,700 V717" marker-end="url(#n)"/>
+          <path class="ar" d="M550,700 V717" marker-end="url(#n)"/>
+          <path class="ar" d="M870,700 V717" marker-end="url(#n)"/>
+
+          <rect class="box-ok" x="120" y="720" width="220" height="58" rx="6"/>
+          <text class="t-ok" x="230" y="743" text-anchor="middle">Covered</text>
+          <text class="t-sub" x="230" y="762" text-anchor="middle">case key + step · no draft</text>
+
+          <rect class="box-warn" x="440" y="720" width="220" height="58" rx="6"/>
+          <text class="t-warn" x="550" y="743" text-anchor="middle">Partial</text>
+          <text class="t-sub" x="550" y="762" text-anchor="middle">extend that case · what's missing</text>
+
+          <rect class="box-miss" x="760" y="720" width="220" height="58" rx="6"/>
+          <text class="t-miss" x="870" y="743" text-anchor="middle">Missing</text>
+          <text class="t-sub" x="870" y="762" text-anchor="middle">no existing case tests it</text>
+
+          <!-- 3 draft -->
+          <path class="ar" d="M550,779 V807" marker-end="url(#n)"/>
+          <path class="ar" d="M870,779 V840 H723" marker-end="url(#n)"/>
+
+          <rect class="box-src" x="120" y="810" width="220" height="60" rx="6"/>
+          <text class="t-name" x="230" y="834" text-anchor="middle">Fallback</text>
+          <text class="t-sub" x="230" y="852" text-anchor="middle">scenario gaps no case picked up</text>
+          <path class="ar-muted" d="M341,840 H377" marker-end="url(#nm)"/>
+
+          <rect class="box-reuse" x="380" y="810" width="340" height="62" rx="6"/>
+          <text class="t-name" x="550" y="833" text-anchor="middle">③ Draft each gap</text>
+          <text class="t-sub" x="550" y="851" text-anchor="middle">"Should be covered: … / No existing case covers it: …"</text>
+          <text class="s-reuse" x="550" y="866" text-anchor="middle">draft · sonnet · batches of 12</text>
+
+          <text class="t-sub" x="230" y="800" text-anchor="middle">→ listed in 8_Test_Design</text>
+
+          <path class="ar" d="M550,873 V912" marker-end="url(#n)"/>
+
+          <!-- Test designer -->
+          <text class="t-lane" x="20" y="936">DESIGN</text>
+          <rect class="box-ext" x="380" y="915" width="340" height="84" rx="6"/>
+          <text class="t-name" x="550" y="939" text-anchor="middle">Test design agent</text>
+          <text class="t-sub" x="550" y="957" text-anchor="middle">naming, steps, folder, create vs extend, decision</text>
+          <text class="s-ext" x="550" y="985" text-anchor="middle">test-designer · keeps each draft to its purpose</text>
+
+          <path class="ar" d="M550,1000 V1026" marker-end="url(#n)"/>
+
+          <!-- Validator -->
+          <text class="t-lane" x="20" y="1050">VALIDATE</text>
+          <rect class="box-ext" x="380" y="1029" width="340" height="84" rx="6"/>
+          <text class="t-name" x="550" y="1053" text-anchor="middle">Coverage validator</text>
+          <text class="t-sub" x="550" y="1071" text-anchor="middle">no duplicate of an existing case · no gap undrafted</text>
+          <text class="s-ext" x="550" y="1099" text-anchor="middle">coverage-validator · maxRounds 1</text>
+          <path class="ar-loop" d="M380,1071 H330 V957 H377" marker-end="url(#nl)"/>
+          <text class="t-llm" x="322" y="1010" text-anchor="end">duplicates / weak drafts</text>
+          <text class="t-llm" x="322" y="1025" text-anchor="end">go back (max 1 round)</text>
+
+          <path class="ar" d="M550,1114 V1140" marker-end="url(#n)"/>
+
+          <!-- Report -->
+          <text class="t-lane" x="20" y="1164">REPORT</text>
+          <rect class="box-ext" x="380" y="1143" width="340" height="88" rx="6"/>
+          <text class="t-name" x="550" y="1167" text-anchor="middle">Gap report + review</text>
+          <text class="t-sub" x="550" y="1185" text-anchor="middle">8_Test_Design (suite + verdicts) · 9_Gaps (you review)</text>
+          <text class="s-ext" x="550" y="1217" text-anchor="middle">reporter · Excel + summary.md + coverage.json</text>
+
+          <rect class="box-danger" x="820" y="1157" width="230" height="60" rx="6"/>
+          <text class="t-name" x="935" y="1181" text-anchor="middle">create-approved</text>
+          <text class="t-sub" x="935" y="1200" text-anchor="middle">dry run, then --yes · no delete</text>
+          <path class="ar-danger" d="M721,1187 H817" marker-end="url(#nd)"/>
+          <text class="t-danger" x="769" y="1179" text-anchor="middle">approved</text>
+        </svg>
+      </div>
+      <div class="legend">
+        <span><i class="sw new"></i>New in this update</span>
+        <span><i class="sw ext"></i>Agent or output changed</span>
+        <span><i class="sw reuse"></i>Unchanged</span>
+        <span><i class="dash"></i>Validator sends drafts back</span>
+        <span><i class="sw danger"></i>The only write to Zephyr</span>
+      </div>
+      <figcaption>The design and check steps run only when the context-builder wrote a module context. Without one (a plain pipeline run), or when the design call returns nothing, the draft stage drafts the scenario gaps as before.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="prose">
+      <h2>What one designed case carries</h2>
+      <p>An illustrative case for grid export, built from the shape the design and check calls return. The second half is what the check adds. A Missing or Partial result becomes a row in <code>9_Gaps</code>, and its reason text joins the two halves.</p>
+    </div>
+    <article class="record" aria-label="Example designed test case">
+      <header><b>TC-07</b><span>Selected-rows export contains only the selected rows</span><span class="verdict">Missing</span></header>
+      <dl>
+        <div class="split">Design · from the module context</div>
+        <dt>storyKey</dt><dd><code>AVLN-2557</code></dd>
+        <dt>basis</dt><dd><code>R-06</code> selected ids are sent to the export job · <code>WF: Export selected rows</code></dd>
+        <dt>scenarioIds</dt><dd><code>AVLN-2557:CODE-06</code></dd>
+        <dt>steps</dt><dd><ol><li>Open Admin › Devices and select two rows</li><li>Click Export</li><li>Download the file from the export-finished notification</li></ol></dd>
+        <dt>expected</dt><dd>The file holds exactly the two selected devices; exact wording not specified</dd>
+        <dt>whyNeeded</dt><dd>R-06 says only the selected ids are exported; without this test, an export of all filtered rows would go unnoticed.</dd>
+        <div class="split">Check · against existing Zephyr cases</div>
+        <dt>verdict</dt><dd>Missing · confidence High</dd>
+        <dt>reasoning</dt><dd>QA-T10977 selects rows and clicks Export, but step 2 only checks that a job is queued. No case opens the file.</dd>
+        <dt>gap</dt><dd><code>GAP-AVLN-2557-TC-07</code> → drafted, then reviewed in <code>9_Gaps</code></dd>
+      </dl>
+    </article>
+  </section>
+
+  <section>
+    <h2>Each step, compared with before</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Step</th><th>Before</th><th>Now</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>Context builder</td><td>Module context was extra input to the drafts</td>
+            <td><ul><li>Same agent and output. Its instructions now say that every rule and workflow becomes a test case, and that anything left out gets none</li></ul></td><td><span class="pill ext">changed</span></td></tr>
+          <tr><td>① Design</td><td>Nothing; tests came only from scenario gaps</td>
+            <td><ul><li>One call (<code>prompts/design.md</code>) writes the suite the module should have: a case per workflow path, at least one per rule, and the negative side of validation and permission rules</li><li>Each case gives its basis, the scenarios it covers, and why it's needed</li><li>Every Missing or Partial scenario must be traced, unless the design says why not</li></ul></td><td><span class="pill new">new</span></td></tr>
+          <tr><td>② Check</td><td>Coverage was judged per scenario only</td>
+            <td><ul><li>A designed case whose scenarios are already settled keeps that verdict at 0 tokens: all Covered with High confidence, or all Missing in its own story. The same existing cases are never judged twice</li><li>The rest go to one call per story (<code>prompts/check.md</code>), steps included</li><li>Covered cites the case and step. Partial names the case to extend and what's missing</li></ul></td><td><span class="pill new">new</span></td></tr>
+          <tr><td>③ Draft</td><td>One draft per scenario gap</td>
+            <td><ul><li>One draft per Missing or Partial designed case (<code>GAP-&lt;story&gt;-TC-nn</code>), built from its basis and <code>whyNeeded</code></li><li>A scenario gap that no designed case picked up is still drafted from the scenario</li></ul></td><td><span class="pill ext">changed</span></td></tr>
+          <tr><td>Test designer</td><td>Fixed drafts against the conventions</td>
+            <td><ul><li>Also checks that each draft keeps to its designed purpose, and names rules no designed case covers</li><li>Reads the suite with <code>inspect --what design</code></li></ul></td><td><span class="pill ext">changed</span></td></tr>
+          <tr><td>Coverage validator</td><td>Duplicate and undrafted checks</td>
+            <td><ul><li>No longer re-reads the candidate cases for designed gaps, because the check step already compared them step by step</li><li>Searches only outside that pool for same-purpose cases, and spends the rest on draft quality</li></ul></td><td><span class="pill ext">changed</span></td></tr>
+          <tr><td>Report</td><td><code>8_Gaps</code> review sheet</td>
+            <td><ul><li>New <code>8_Test_Design</code> sheet with the whole suite and its verdicts; the review sheet is now <code>9_Gaps</code></li><li><code>summary.md</code> gets a Test design table and a list of cases that should be tested but aren't</li><li><code>design</code> and <code>check</code> show as their own rows in the tokens table</li></ul></td><td><span class="pill ext">changed</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="prose">
+      <h2>Workbook sheets</h2>
+      <p>One new sheet after <code>7_Matching</code>; the sheets after it move up by one. <code>create-approved</code> still reads older workbooks whose review sheet is <code>8_Gaps</code> or <code>6_Gaps</code>.</p>
+    </div>
+    <div class="sheets" role="list">
+      <span role="listitem">Summary</span><span role="listitem">1_Module_Context</span><span role="listitem">2_Story_Triage</span><span role="listitem">3_Link_Check</span>
+      <span role="listitem">4_Expected_Scenarios</span><span role="listitem">5_UI_Exploration</span><span role="listitem">6_Zephyr_Cases</span><span role="listitem">7_Matching</span>
+      <span role="listitem" class="hl">8_Test_Design</span><span role="listitem" class="rv">9_Gaps · review here</span><span role="listitem">10_Orphan_Zephyr</span><span role="listitem">11_Agents</span>
+      <span role="listitem">12_Agent_Reviews</span><span role="listitem">13_Run_Log</span><span role="listitem">14_Token_Usage</span>
+    </div>
+  </section>
+
+  <section>
+    <div class="prose">
+      <h2>Still to do</h2>
+    </div>
+    <ol class="questions">
+      <li><b>First real run: done.</b> Grid export ran end to end on 2026-10-19: 31 designed cases (3 covered, 7 partly covered, 21 missing) and 30 drafts for review.</li>
+      <li><b>Calibration.</b> Run AVLN-2398 and confirm UC-01 still matches QA-T10855 (main), QA-T10856 (cancel) and QA-T10858 (rejected upload).</li>
+      <li><b>Tuning.</b> Check the suite size per module. If it's too large or too thin, adjust <code>prompts/design.md</code>, <code>limits.designContextChars</code> or the design and check models.</li>
+      <li><b>Commit: done.</b> Pushed to <code>feature/new-implementation</code>, with 60 unit tests passing.</li>
+    </ol>
+  </section>
+
+  <section>
+    <div class="prose">
+      <h2>Where to make a change</h2>
+    </div>
+    <div class="changes">
+      <div><h3>What the suite should contain</h3><p><code>prompts/design.md</code>, then <code>node scripts/gen-llm-schemas.mjs</code> if the shape changes</p></div>
+      <div><h3>How coverage is judged</h3><p><code>prompts/check.md</code></p></div>
+      <div><h3>Gap rules and fallback</h3><p><code>scripts/lib/test-design.mjs</code> (pure helpers, tested in <code>test/core.test.mjs</code>)</p></div>
+      <div><h3>Stage order and calls</h3><p><code>draftStage</code> and <code>designSuite</code> in <code>scripts/lib/stages.mjs</code></p></div>
+      <div><h3>Models and context size</h3><p><code>models.design</code>, <code>models.check</code>, <code>limits.designContextChars</code> (design call), <code>limits.moduleContextChars</code> (each draft batch) in <code>config/config.yaml</code></p></div>
+      <div><h3>Sheet and summary</h3><p><code>scripts/lib/workbook.mjs</code> (<code>testDesignRows</code>), <code>scripts/lib/report.mjs</code></p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Rules a change must keep</h2>
+    <ul class="rules">
+      <li>Zephyr has no delete endpoint. Cases are created only through <code>create-approved</code> (dry run, then <code>--yes</code>) after explicit approval.</li>
+      <li>No Jira comments or issue changes during an analysis.</li>
+      <li>Agents change state only through their own review file, never <code>state.json</code> or the workbook.</li>
+      <li>Every designed case carries a <code>whyNeeded</code> and a check reasoning; the workbook build rejects rows without them.</li>
+      <li>Report tokens only, never cost.</li>
+    </ul>
+  </section>
+</main>

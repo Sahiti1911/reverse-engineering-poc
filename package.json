@@ -7,7 +7,9 @@
   "scripts": {
     "coverage": "node scripts/run.mjs",
     "create-approved": "node scripts/create-approved.mjs",
-    "test": "node --test \"test/*.test.mjs\" && npm --prefix zephyr_mcp test"
+    "test": "node --test \"test/*.test.mjs\" && npm --prefix zephyr_mcp test",
+    "ui-login": "node scripts/ui-login.mjs",
+    "agents": "node scripts/agents.mjs"
   },
   "engines": {
     "node": ">=20"
@@ -16,6 +18,10 @@
     "ajv": "^8.20.0",
     "dotenv": "^17.2.3",
     "exceljs": "^4.4.0",
-    "node-html-parser": "^7.0.1"
+    "node-html-parser": "^7.0.1",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.63.0"
   }
 }

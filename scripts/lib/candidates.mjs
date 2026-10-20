@@ -4,10 +4,12 @@ import { tokens, overlap } from "./util.mjs";
  * Which existing Zephyr cases a story is compared against (0 tokens):
  *  1. cases linked to the story or a related story (linkTypesToFollow),
  *  2. unlinked cases in the same folders as those,
- *  3. keyword hits on case names under the profile's folderRoot (finds coverage that was never linked).
+ *  3. module scope: cases in the module's Zephyr folder that share a word with the story's scenarios, and
+ *     cases whose name contains a module keyword (the module's tests, linked to some other story or none),
+ *  4. keyword hits on case names under the profile's folderRoot (finds coverage that was never linked).
  * Linked cases always come first, so the cap never drops them.
  */
-export function selectCandidates({ story, zephyr, expected, limits }) {
+export function selectCandidates({ story, zephyr, expected, limits, module = null }) {
   const out = new Map();
   const add = (key, why, linked) => {
     if (!out.has(key) && zephyr.byKey.has(key)) out.set(key, { key, why, linked });
@@ -25,6 +27,24 @@ export function selectCandidates({ story, zephyr, expected, limits }) {
   }
 
   const storyTokens = tokens([story.summary, story.module, ...expected.slice(0, 15).map((e) => e.title)].join(" "));
+  if (module) {
+    const folder = module.zephyrFolder?.toLowerCase();
+    const scored = [];
+    for (const c of zephyr.inScopeCases) {
+      if (out.has(c.key)) continue;
+      const inFolder = folder && c.folderPath.toLowerCase().includes(folder);
+      const named = module.rx?.test(c.name);
+      if (!inFolder && !named) continue;
+      const hits = [...tokens(c.name)].filter((t) => storyTokens.has(t));
+      if (!named && !hits.length) continue;
+      scored.push({ c, score: hits.length + (named ? 1 : 0) + (inFolder ? 1 : 0), inFolder, named, hits });
+    }
+    scored.sort((a, b) => b.score - a.score || a.c.key.localeCompare(b.c.key));
+    for (const { c, inFolder, named, hits } of scored.slice(0, limits.moduleCandidates ?? 15)) {
+      if (out.size >= limits.candidateCasesPerStory) break;
+      add(c.key, [inFolder && `in the module's Zephyr folder "${module.zephyrFolder}"`, named && "name contains a module keyword", hits.length && `shares: ${hits.slice(0, 4).join(", ")}`].filter(Boolean).join("; "), false);
+    }
+  }
   const scored = [];
   for (const c of zephyr.inScopeCases) {
     if (out.has(c.key)) continue;

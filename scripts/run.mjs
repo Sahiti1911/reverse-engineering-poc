@@ -18,7 +18,7 @@ import { readJson, writeJson } from "./lib/util.mjs";
 
 const USAGE = `Usage:
   node scripts/run.mjs --module "<name>" [options]                         all stages for a module (name/alias from modules.json, or a code path)
-  node scripts/run.mjs [--profile <name>] --scope <scope> [options]        all stages (profile defaults to config/run.json defaultProfile)
+  node scripts/run.mjs [--profile <name>] --scope <scope> [options]        all stages (profile defaults to config/config.yaml defaultProfile)
   node scripts/run.mjs --stage <stage> --run-dir <dir> [options]           one stage (${STAGES.join(" → ")})
   node scripts/run.mjs --create-approved <workbook.xlsx> [--yes]
 
@@ -26,9 +26,11 @@ Scopes: project | epic:KEY | sprint:active | sprint:<name> | module:<path> | iss
 Options:
   --keywords "a,b"               module scope: related words (stories mentioning them belong to the module)
   --remember                     save the keywords into the profile for next time
+  --extra-stories <file|K1,K2>   module scope: candidate stories found elsewhere (e.g. Rovo search, JSON
+                                 [{key, summary, query}]); added for the scout to confirm, not keyword-matched
   --since <YYYY-MM-DD|last-run>  only stories updated since then
   --limit <n>                    first n stories of the scope (trial runs)
-  --concurrency <n>              parallel Claude calls (default config/run.json)
+  --concurrency <n>              parallel Claude calls (default config/config.yaml)
   --no-code                      skip code-derived scenarios
   --refresh-zephyr               ignore the cached Zephyr export
   --force                        ignore cached Claude results (uses tokens again)
@@ -38,7 +40,7 @@ Options:
 const { values: args } = parseArgs({
   options: {
     profile: { type: "string" }, scope: { type: "string" }, since: { type: "string" }, limit: { type: "string" },
-    keywords: { type: "string" }, remember: { type: "boolean" }, stage: { type: "string" }, "run-dir": { type: "string" },
+    keywords: { type: "string" }, remember: { type: "boolean" }, "extra-stories": { type: "string" }, stage: { type: "string" }, "run-dir": { type: "string" },
     module: { type: "string" },
     concurrency: { type: "string" }, "no-code": { type: "boolean" }, "refresh-zephyr": { type: "boolean" },
     force: { type: "boolean" }, "dry-run": { type: "boolean" }, out: { type: "string" },
@@ -57,7 +59,7 @@ if (args["create-approved"]) {
   process.exit(0);
 }
 
-// --profile defaults to config/run.json defaultProfile; --module "<name>" is short for --scope module:<name>.
+// --profile defaults to config/config.yaml defaultProfile; --module "<name>" is short for --scope module:<name>.
 if (!args.stage || args.stage === "scope") args.profile = profileName(args.profile);
 if (args.module && !args.scope) args.scope = `module:${args.module}`;
 
@@ -68,6 +70,15 @@ function sinceArg(profileName) {
   const since = readJson(path.join(ROOT, "runs", profileName, "state.json"), {}).lastRunAt?.slice(0, 10);
   if (!since) throw new Error("--since last-run: no previous run recorded for this profile");
   return since;
+}
+
+/** --extra-stories: a JSON file ([{key, summary, query}] or {stories: [...]}) or a list of keys. */
+function extraStoriesArg() {
+  const v = args["extra-stories"];
+  if (!v) return undefined;
+  if (!fs.existsSync(v)) return v;
+  const json = readJson(path.resolve(v));
+  return Array.isArray(json) ? json : json.stories ?? [];
 }
 
 function newRunDir(profileName) {
@@ -84,7 +95,7 @@ Done. ${ctx.stories.length} stories (${ctx.testable().length} testable), ${c.exp
 Tokens used: ${tok.total.total_tokens.toLocaleString("en-US")} (pipeline ${tok.pipeline.total_tokens.toLocaleString("en-US")}, agents ${tok.agents.total_tokens.toLocaleString("en-US")}; ${tok.total.calls - tok.total.reused} new call(s), ${tok.total.reused} from cache)
 Workbook: ${result.workbookPath}
 Summary:  ${result.summaryPath}
-Review the 6_Gaps sheet (Review decision column), then: node scripts/run.mjs --create-approved "${result.workbookPath}"`);
+Review the 9_Gaps sheet (Review decision column), then: node scripts/run.mjs --create-approved "${result.workbookPath}"`);
 }
 
 try {
@@ -97,7 +108,7 @@ try {
     if (args.stage === "scope") {
       if (!args.profile || !args.scope) throw new Error("--stage scope needs --profile and --scope");
       ctx = RunContext.create({ runDir, profileName: args.profile, opts });
-      await STAGE_FUNCS.scope(ctx, { scopeArg: args.scope, since: sinceArg(args.profile), keywords: args.keywords, limit: args.limit, remember: args.remember });
+      await STAGE_FUNCS.scope(ctx, { scopeArg: args.scope, since: sinceArg(args.profile), keywords: args.keywords, extraStories: extraStoriesArg(), limit: args.limit, remember: args.remember });
     } else {
       ctx = RunContext.load(runDir, opts);
       const missing = STAGES.slice(0, STAGES.indexOf(args.stage)).filter((s) => !ctx.state.stagesDone.includes(s));
@@ -120,13 +131,13 @@ try {
     fs.mkdirSync(runDir, { recursive: true });
     const ctx = RunContext.create({ runDir, profileName: args.profile, opts });
     ctx.log(`Profile ${args.profile} | scope ${args.scope} | run folder ${path.relative(ROOT, runDir)}`);
-    await STAGE_FUNCS.scope(ctx, { scopeArg: args.scope, since: sinceArg(args.profile), keywords: args.keywords, limit: args.limit, remember: args.remember });
+    await STAGE_FUNCS.scope(ctx, { scopeArg: args.scope, since: sinceArg(args.profile), keywords: args.keywords, extraStories: extraStoriesArg(), limit: args.limit, remember: args.remember });
     ctx.save();
     if (!ctx.stories.length) {
       console.log("No stories in scope — nothing to analyse.");
       process.exit(0);
     }
-    for (const stage of ["requirements", "code", "match", "draft"]) {
+    for (const stage of ["requirements", "code", "zephyr", "context", "draft", "validate"]) {
       await STAGE_FUNCS[stage](ctx);
       ctx.save();
     }

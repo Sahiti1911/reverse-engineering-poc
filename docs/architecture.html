@@ -1,0 +1,403 @@
+<title>Coverage Gap POC Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; diagrams break out wider and scroll sideways on phones. */
+:root {
+  --bg: #f5f7f8; --fg: #1b2a30; --muted: #5b6c73; --line: #cdd6da;
+  --lane: #e8eef0; --agent: #dff1ee; --agent-edge: #2d8a7d;
+  --new: #a8620a; --new-bg: #fbefdc; --danger: #c23a26; --danger-bg: #fbe5e1;
+  --display: "IBM Plex Sans Condensed", "Arial Narrow", sans-serif;
+  --body: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12191c; --fg: #e3eaec; --muted: #93a4ab; --line: #34444a;
+  --lane: #1c272b; --agent: #173733; --agent-edge: #4fc0ae;
+  --new: #f0aa4a; --new-bg: #3a2a12; --danger: #ff7a63; --danger-bg: #42201a; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #12191c; --fg: #e3eaec; --muted: #93a4ab; --line: #34444a;
+  --lane: #1c272b; --agent: #173733; --agent-edge: #4fc0ae;
+  --new: #f0aa4a; --new-bg: #3a2a12; --danger: #ff7a63; --danger-bg: #42201a; color-scheme: dark }
+
+body { background: var(--bg); color: var(--fg); font: 15px/1.55 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 32px 64px; }
+main { max-width: 1220px; margin: 0 auto; display: grid; gap: 44px; }
+.prose { max-width: 72ch; }
+h1, h2 { font-family: var(--display); font-weight: 600; text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: 2.1rem; }
+h2 { font-size: 1.45rem; margin-bottom: 10px; }
+p { margin: 0 0 10px; }
+.eyebrow { font: 500 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+code { font: 0.86em var(--mono); background: var(--lane); padding: 1px 5px; border-radius: 3px; }
+section { display: grid; gap: 12px; min-width: 0; }
+
+figure { margin: 0; min-width: 0; }
+.scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+.scroll svg { display: block; min-width: 900px; width: 100%; height: auto; }
+.scroll.target svg { max-width: 1100px; margin: 0 auto; }
+figcaption { color: var(--muted); font-size: 13.5px; margin-top: 10px; max-width: 80ch; }
+
+svg text { fill: var(--fg); font-family: var(--body); font-size: 12px; }
+svg .t-name { font-weight: 600; font-size: 13.5px; }
+svg .t-sub { fill: var(--muted); font-size: 11.5px; }
+svg .t-mono { font-family: var(--mono); font-size: 10.5px; fill: var(--fg); }
+svg .t-lane { font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em; fill: var(--muted); }
+svg .t-llm { fill: var(--new); font-weight: 500; font-size: 11px; }
+svg .t-danger { fill: var(--danger); font-weight: 600; font-size: 11px; }
+svg .s-new { font-family: var(--mono); font-size: 10.5px; font-weight: 500; fill: var(--new); }
+svg .s-ext { font-family: var(--mono); font-size: 10.5px; font-weight: 500; fill: var(--agent-edge); }
+svg .s-reuse { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); }
+svg .lane { fill: var(--lane); }
+svg .box { fill: var(--bg); stroke: var(--fg); stroke-width: 1.2; }
+svg .box-reuse { fill: var(--bg); stroke: var(--muted); stroke-width: 1.2; }
+svg .box-ext { fill: var(--agent); stroke: var(--agent-edge); stroke-width: 1.4; }
+svg .box-new { fill: var(--new-bg); stroke: var(--new); stroke-width: 1.6; }
+svg .box-agent { fill: var(--agent); stroke: var(--agent-edge); stroke-width: 1.4; }
+svg .box-src { fill: var(--bg); stroke: var(--muted); stroke-width: 1; }
+svg .box-out { fill: var(--bg); stroke: var(--fg); stroke-width: 1.8; }
+svg .box-danger { fill: var(--danger-bg); stroke: var(--danger); stroke-width: 1.4; }
+svg .ar { stroke: var(--fg); stroke-width: 1.3; fill: none; }
+svg .ar-muted { stroke: var(--muted); stroke-width: 1.1; fill: none; }
+svg .ar-review { stroke: var(--agent-edge); stroke-width: 1.4; stroke-dasharray: 5 4; fill: none; }
+svg .ar-loop { stroke: var(--new); stroke-width: 1.4; stroke-dasharray: 5 4; fill: none; }
+svg .ar-danger { stroke: var(--danger); stroke-width: 2; fill: none; }
+svg .head { fill: var(--fg); }
+svg .head-muted { fill: var(--muted); }
+svg .head-review { fill: var(--agent-edge); }
+svg .head-new { fill: var(--new); }
+svg .head-danger { fill: var(--danger); }
+
+.legend { display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 13px; color: var(--muted); margin-top: 10px; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.sw { width: 22px; height: 12px; border-radius: 2px; display: inline-block; }
+.sw.reuse { background: var(--bg); border: 1.2px solid var(--muted); }
+.sw.ext, .sw.agent { background: var(--agent); border: 1.4px solid var(--agent-edge); }
+.sw.new { background: var(--new-bg); border: 1.6px solid var(--new); }
+.sw.danger { background: var(--danger-bg); border: 1.4px solid var(--danger); }
+.dash { width: 26px; border-top: 2px dashed var(--agent-edge); display: inline-block; }
+.dash.new { border-color: var(--new); }
+
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; }
+table { border-collapse: collapse; width: 100%; min-width: 860px; font-size: 13.5px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+th { font: 500 11.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--lane); }
+tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 600; white-space: nowrap; }
+td ul { margin: 0; padding-left: 18px; }
+td li { margin-bottom: 3px; }
+.pill { font: 500 11px var(--mono); padding: 2px 7px; border-radius: 3px; white-space: nowrap; }
+.pill.new { color: var(--new); background: var(--new-bg); }
+.pill.ext { color: var(--agent-edge); background: var(--agent); }
+.pill.reuse { color: var(--muted); background: var(--lane); }
+
+.breaks { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.breaks div { border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; min-width: 0; }
+.breaks h3 { font-size: 14.5px; margin: 0 0 6px; }
+.breaks p { font-size: 13.5px; margin: 0 0 6px; color: var(--muted); }
+.breaks p.fix { color: var(--fg); margin: 0; }
+.breaks p.fix::before { content: "Now: "; font-weight: 600; }
+
+.questions { margin: 0; padding-left: 20px; display: grid; gap: 8px; max-width: 80ch; }
+.questions b { font-weight: 600; }
+
+.changes { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.changes div { padding: 14px 16px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); min-width: 0; }
+.changes h3 { font-size: 14px; margin: 0 0 6px; font-weight: 600; }
+.changes p { font-size: 13.5px; color: var(--muted); margin: 0; }
+.changes code { overflow-wrap: anywhere; }
+
+.rules { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.rules li { padding: 10px 14px; border-left: 3px solid var(--danger); background: var(--danger-bg); border-radius: 0 4px 4px 0; font-size: 14px; }
+
+details { border: 1px solid var(--line); border-radius: 6px; padding: 12px 16px; }
+details summary { cursor: pointer; font-family: var(--display); font-weight: 600; font-size: 1.2rem; }
+details[open] summary { margin-bottom: 12px; }
+summary:focus-visible { outline: 2px solid var(--agent-edge); outline-offset: 3px; }
+</style>
+
+<main>
+  <header class="prose">
+    <div class="eyebrow">Reverse_engineering_poc · branch feature/new-implementation</div>
+    <h1>Coverage Gap POC Map</h1>
+    <p style="margin-top:12px">The tool finds test cases that should exist in Zephyr Scale but don't. The new flow explores four sources in parallel (requirements, code, the running UI and the existing Zephyr tests), joins them into a single context, and designs tests only for what that context shows as uncovered or partial. Nothing is written to Zephyr until a tester approves it.</p>
+  </header>
+
+  <section>
+    <div class="prose">
+      <h2>Target flow</h2>
+      <p>Every box is an agent. <code>config/config.yaml</code> says which agents run in each phase; the agents of one phase run in parallel. Each explorer writes its own review file, and only the context stage combines them.</p>
+    </div>
+    <figure>
+      <div class="scroll target">
+        <svg viewBox="0 0 1100 780" role="img" aria-label="The scope agent fans out to four explorers that run in parallel: requirements, code, UI with Playwright, and Zephyr. Each writes its own JSON file. A context builder joins them per requirement and marks each item covered, partial or uncovered. The test design agent drafts only the partial and uncovered items. A coverage validator rejects duplicates and missing drafts back to test design. The gap report goes to testers, and only approved rows are created in Zephyr.">
+          <defs>
+            <marker id="n" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head"/></marker>
+            <marker id="nl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head-new"/></marker>
+            <marker id="nd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head-danger"/></marker>
+          </defs>
+
+          <!-- Scope -->
+          <rect class="box-ext" x="380" y="20" width="340" height="84" rx="6"/>
+          <text class="t-name" x="550" y="44" text-anchor="middle">Scope agent</text>
+          <text class="t-sub" x="550" y="62" text-anchor="middle">env.yaml · Done stories only · baseline</text>
+          <text class="s-ext" x="550" y="88" text-anchor="middle">module-scout · statusCategories, baseline</text>
+          <text class="t-lane" x="20" y="40">EVERY BOX IS AN AGENT</text>
+          <text class="t-mono" x="20" y="58">phases + agents: config/config.yaml</text>
+          <text class="t-mono" x="20" y="74">remove an agent = part off</text>
+
+          <!-- fan-out -->
+          <path class="ar" d="M550,105 V128"/>
+          <path class="ar" d="M155,128 H935"/>
+          <path class="ar" d="M155,128 V155" marker-end="url(#n)"/>
+          <path class="ar" d="M415,128 V155" marker-end="url(#n)"/>
+          <path class="ar" d="M675,128 V155" marker-end="url(#n)"/>
+          <path class="ar" d="M935,128 V155" marker-end="url(#n)"/>
+          <text class="t-sub" x="730" y="120">scope.json to all four · run in parallel</text>
+
+          <!-- Explorers -->
+          <rect class="box-ext" x="40" y="158" width="230" height="110" rx="6"/>
+          <text class="t-name" x="155" y="182" text-anchor="middle">Requirements</text>
+          <text class="t-sub" x="155" y="200" text-anchor="middle">Jira · Done stories, UC docs, AC</text>
+          <text class="t-mono" x="155" y="222" text-anchor="middle">→ requirements.json</text>
+          <text class="s-ext" x="155" y="252" text-anchor="middle">requirements-analyst</text>
+
+          <rect class="box-reuse" x="300" y="158" width="230" height="110" rx="6"/>
+          <text class="t-name" x="415" y="182" text-anchor="middle">Code</text>
+          <text class="t-sub" x="415" y="200" text-anchor="middle">Bitbucket · frontend + backend</text>
+          <text class="t-mono" x="415" y="222" text-anchor="middle">→ code.json</text>
+          <text class="s-reuse" x="415" y="252" text-anchor="middle">code-analyst</text>
+
+          <rect class="box-new" x="560" y="158" width="230" height="110" rx="6"/>
+          <text class="t-name" x="675" y="182" text-anchor="middle">UI</text>
+          <text class="t-sub" x="675" y="200" text-anchor="middle">Test env · Playwright MCP</text>
+          <text class="t-mono" x="675" y="222" text-anchor="middle">→ ui.json</text>
+          <text class="s-new" x="675" y="252" text-anchor="middle">ui-explorer · mode read-only</text>
+
+          <rect class="box-new" x="820" y="158" width="230" height="110" rx="6"/>
+          <text class="t-name" x="935" y="182" text-anchor="middle">Zephyr + QA</text>
+          <text class="t-sub" x="935" y="200" text-anchor="middle">Existing cases, steps, folders</text>
+          <text class="t-mono" x="935" y="222" text-anchor="middle">→ zephyr.json</text>
+          <text class="s-new" x="935" y="252" text-anchor="middle">zephyr-explorer</text>
+
+          <!-- merge -->
+          <path class="ar" d="M155,269 V296"/>
+          <path class="ar" d="M415,269 V296"/>
+          <path class="ar" d="M675,269 V296"/>
+          <path class="ar" d="M935,269 V296"/>
+          <path class="ar" d="M155,296 H935"/>
+          <path class="ar" d="M550,296 V321" marker-end="url(#n)"/>
+          <text class="t-sub" x="560" y="314">four files, no shared state.json writes</text>
+
+          <!-- Context builder -->
+          <rect class="box-new" x="300" y="324" width="500" height="96" rx="6"/>
+          <text class="t-name" x="550" y="348" text-anchor="middle">Context builder</text>
+          <text class="t-sub" x="550" y="366" text-anchor="middle">joins per requirement: code + UI evidence, linked and candidate Zephyr cases</text>
+          <text class="t-mono" x="550" y="386" text-anchor="middle">→ context.json · each item Covered / Partial / Uncovered</text>
+          <text class="s-new" x="550" y="408" text-anchor="middle">context-builder · merges all four reviews</text>
+
+          <path class="ar" d="M550,421 V447" marker-end="url(#n)"/>
+
+          <!-- Test design -->
+          <rect class="box-reuse" x="380" y="450" width="340" height="84" rx="6"/>
+          <text class="t-name" x="550" y="474" text-anchor="middle">Test design agent</text>
+          <text class="t-sub" x="550" y="492" text-anchor="middle">only Partial / Uncovered items → drafts.json</text>
+          <text class="s-reuse" x="550" y="520" text-anchor="middle">test-designer</text>
+
+          <path class="ar" d="M550,535 V561" marker-end="url(#n)"/>
+
+          <!-- Validator -->
+          <rect class="box-new" x="380" y="564" width="340" height="84" rx="6"/>
+          <text class="t-name" x="550" y="588" text-anchor="middle">Coverage validator</text>
+          <text class="t-sub" x="550" y="606" text-anchor="middle">no duplicate of an existing case · no gap left undrafted</text>
+          <text class="s-new" x="550" y="634" text-anchor="middle">coverage-validator · maxRounds 1</text>
+          <path class="ar-loop" d="M380,606 H330 V492 H377" marker-end="url(#nl)"/>
+          <text class="t-llm" x="322" y="545" text-anchor="end">rejected drafts</text>
+          <text class="t-llm" x="322" y="560" text-anchor="end">go back (max 1 round)</text>
+
+          <path class="ar" d="M550,649 V675" marker-end="url(#n)"/>
+
+          <!-- Report -->
+          <rect class="box-ext" x="380" y="678" width="340" height="84" rx="6"/>
+          <text class="t-name" x="550" y="702" text-anchor="middle">Gap report + review</text>
+          <text class="t-sub" x="550" y="720" text-anchor="middle">Excel + JSON · testers approve in 6_Gaps</text>
+          <text class="s-ext" x="550" y="748" text-anchor="middle">reporter · Excel + coverage.json</text>
+
+          <rect class="box-danger" x="820" y="690" width="230" height="60" rx="6"/>
+          <text class="t-name" x="935" y="714" text-anchor="middle">create-approved</text>
+          <text class="t-sub" x="935" y="733" text-anchor="middle">--yes writes Zephyr · no delete</text>
+          <path class="ar-danger" d="M721,720 H817" marker-end="url(#nd)"/>
+          <text class="t-danger" x="769" y="712" text-anchor="middle">approved</text>
+        </svg>
+      </div>
+      <div class="legend">
+        <span><i class="sw new"></i>New agent</span>
+        <span><i class="sw ext"></i>Existing agent, extended</span>
+        <span><i class="sw reuse"></i>Existing agent, unchanged</span>
+        <span><i class="dash new"></i>Validator sends rejected drafts back</span>
+        <span><i class="sw danger"></i>The only write to Zephyr</span>
+      </div>
+      <figcaption>Before each phase the orchestrator runs that phase's script stages, one after another and at 0 agent tokens. Then the phase's agents start together. Everything that compares sources happens in the context phase.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Each box, compared with today</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Box</th><th>Today</th><th>What changes</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>Scope agent</td><td><code>module-scout</code> + scope stage: JQL, module filter, rule triage, Zephyr export, link check</td>
+            <td><ul><li>Reads <code>env.yaml</code> (environment URL, login reference, run settings)</li><li>Adds a Done filter: <code>statusCategory = Done</code> in the JQL</li><li>Baseline: compares with the previous run so only new or changed stories are analysed</li><li>Zephyr export and link check move to the Zephyr explorer</li></ul></td><td><span class="pill ext">extend</span></td></tr>
+          <tr><td>Requirements</td><td>requirements stage + <code>requirements-analyst</code>: LLM triage, UC-doc parser, extract-ac</td>
+            <td><ul><li>Its agent runs alongside the other explorers; its review merges in the context stage</li><li>The agent gets only the scout's handoff</li></ul></td><td><span class="pill ext">extend</span></td></tr>
+          <tr><td>Code</td><td>code stage + <code>code-analyst</code>: discovery, keyword sweep, extract-code</td>
+            <td><ul><li>Unchanged; its stage still runs before the explorer agents start, so it still sees the story scenario titles</li></ul></td><td><span class="pill reuse">reuse</span></td></tr>
+          <tr><td>UI</td><td>Nothing</td>
+            <td><ul><li>New <code>ui-explorer</code> agent with Playwright MCP added to <code>.mcp.json</code> (local stdio, so it works headless)</li><li>Opens the module's screens on the test env and records fields, validations, buttons, states and permission gates</li><li>Writes <code>ui.json</code>: scenarios with <code>source: "ui"</code>, each with a screenshot or snapshot path as evidence</li></ul></td><td><span class="pill new">new</span></td></tr>
+          <tr><td>Zephyr + QA</td><td>Spread out: export in scope, candidate selection and step fetching in match</td>
+            <td><ul><li>A new stage collects them: export, linked cases, module folder, keyword hits, steps</li><li>Writes <code>zephyr.json</code>. Mostly a move of <code>zephyr.mjs</code> + <code>candidates.mjs</code></li></ul></td><td><span class="pill new">new</span></td></tr>
+          <tr><td>Context builder</td><td>Match stage compares scenarios with candidates per story</td>
+            <td><ul><li>The context stage merges the four review files: story and code scenarios, UI scenarios and observations, Zephyr candidates</li><li>The match LLM judges coverage per scenario, now with UI evidence</li><li>The <code>context-builder</code> agent checks where sources disagree and verifies doubtful verdicts</li></ul></td><td><span class="pill new">new</span></td></tr>
+          <tr><td>Test design</td><td>Draft stage + <code>test-designer</code></td>
+            <td><ul><li>Reads <code>context.json</code> and drafts only Partial / Uncovered items</li></ul></td><td><span class="pill reuse">reuse</span></td></tr>
+          <tr><td>Coverage validator</td><td><code>coverage-matcher</code> re-checks verdicts before drafting</td>
+            <td><ul><li>Moves after drafting: checks each draft against Zephyr for duplicates, and that every uncovered item has a draft</li><li>Sends rejected drafts back to test design once, then reports what is left</li></ul></td><td><span class="pill new">new</span></td></tr>
+          <tr><td>Gap report</td><td>Report stage: workbook + <code>summary.md</code></td>
+            <td><ul><li>Adds a JSON export next to the Excel file</li><li>Adds a Validation column; UI checks show in Agent review</li></ul></td><td><span class="pill ext">extend</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="prose">
+      <h2>How the parallel run stays consistent</h2>
+      <p>The old chain relied on its order in four places. This is how each one is handled now.</p>
+    </div>
+    <div class="breaks">
+      <div><h3>Code reads requirement output</h3><p>The code stage sends the story scenario titles to the LLM so it can skip duplicates (<code>stages.mjs:276</code>).</p><p class="fix">Only the agents run in parallel. The script stages still run one after another, so the code stage still gets the titles.</p></div>
+      <div><h3>All stages write state.json</h3><p>Every stage loads, mutates and saves the same file. Two explorers saving at once overwrite each other.</p><p class="fix">Agents never write <code>state.json</code>. Only the orchestrator's stages do, one at a time.</p></div>
+      <div><h3>Reviews merge into the next stage</h3><p><code>reviews.mjs</code> applies agent N's review when stage N+1 runs. With four explorers there's no single next stage.</p><p class="fix">All four explorer reviews merge in the context stage.</p></div>
+      <div><h3>Handoffs are a chain</h3><p><code>agents.mjs</code> passes every earlier agent's findings forward, and the token budget is checked between agents.</p><p class="fix">Each agent gets the handoffs of every earlier phase, so the explorers see the scout's and the context-builder sees all four. The token budget is checked before each phase.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="prose">
+      <h2>Still to do</h2>
+    </div>
+    <ol class="questions">
+      <li><b>Test environment.</b> Put the real AVL test URL in <code>environments.test.uiBaseUrl</code>, then run <code>npm run ui-login</code> once to save the session.</li>
+      <li><b>Calibration run.</b> One real run on AVLN-2398 (about 60k tokens) to confirm UC-01 still matches QA-T10855, QA-T10856 and QA-T10858.</li>
+      <li><b>First live UI run.</b> Tune <code>maxPages</code>, and add <code>allowedWriteUrls</code> if the grids send their searches as POST.</li>
+      <li><b>Baseline.</b> Built as "only stories updated since the last finished run of the same scope" (<code>scope.baseline: last-run</code>). Say if you meant something else.</li>
+    </ol>
+  </section>
+
+  <section>
+    <div class="prose">
+      <h2>Where to make a change</h2>
+      <p>Project facts live only in <code>profiles/&lt;name&gt;/</code>; everything under <code>scripts/</code> stays project-agnostic.</p>
+    </div>
+    <div class="changes">
+      <div><h3>Environment and login</h3><p><code>environments</code> in <code>config/config.yaml</code>; save a login with <code>npm run ui-login</code></p></div>
+      <div><h3>UI mode and Playwright</h3><p><code>agents.ui-explorer</code> in config.yaml; tools per mode in <code>uiTools()</code>, <code>scripts/lib/pipeline.mjs</code>. The MCP config is generated per run.</p></div>
+      <div><h3>Which agents run</h3><p><code>pipeline</code> in <code>config/config.yaml</code>; the agent registry is <code>AGENTS</code> in <code>scripts/lib/pipeline.mjs</code></p></div>
+      <div><h3>Scope filters</h3><p><code>scope.statusCategories</code> and <code>scope.baseline</code> in config.yaml</p></div>
+      <div><h3>How reviews merge</h3><p><code>scripts/lib/reviews.mjs</code>; schemas in <code>schema/review/</code></p></div>
+      <div><h3>A module's keywords, folder or stories</h3><p><code>profiles/avl/modules.json</code>, or <code>vocab.mjs --save</code></p></div>
+      <div><h3>Models, batch sizes, caps, token budget</h3><p><code>config/config.yaml</code></p></div>
+      <div><h3>What an LLM stage asks or returns</h3><p><code>prompts/&lt;stage&gt;.md</code> plus schema, then <code>node scripts/gen-llm-schemas.mjs</code></p></div>
+      <div><h3>An agent's instructions and tools</h3><p><code>.claude/agents/&lt;name&gt;.md</code> (keep <code>StructuredOutput</code>), <code>allowedTools()</code></p></div>
+      <div><h3>Workbook and JSON output</h3><p><code>scripts/lib/workbook.mjs</code>, <code>scripts/lib/report.mjs</code></p></div>
+      <div><h3>Creating cases in Zephyr</h3><p><code>scripts/create-approved.mjs</code>, <code>zephyr_mcp/</code></p></div>
+      <div><h3>Any new pure helper</h3><p>Add a test in <code>test/core.test.mjs</code>, run <code>npm test</code></p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Rules a change must keep</h2>
+    <ul class="rules">
+      <li>Zephyr has no delete endpoint. Cases are created only through <code>create-approved</code> (dry run, then <code>--yes</code>) after explicit approval.</li>
+      <li>No Jira comments or issue changes during an analysis.</li>
+      <li>Agents change state only through their own review file, never <code>state.json</code> or the workbook.</li>
+      <li>The UI explorer must not change data in the app unless the target environment is explicitly a disposable test env.</li>
+      <li>Report tokens only, never cost; a test enforces it. Every decision row carries a reasoning string.</li>
+    </ul>
+  </section>
+
+  <details>
+    <summary>Today's chain on main, for reference</summary>
+    <figure>
+      <div class="scroll">
+        <svg viewBox="0 0 1200 425" role="img" aria-label="Today: six pipeline stages run in sequence on shared state. Above each stage an agent reviews its output and passes a review file to the next stage and a handoff to the next agent. Jira, git and Zephyr feed the stages. The report produces a workbook; only create-approved writes to Zephyr.">
+          <defs>
+            <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head"/></marker>
+            <marker id="am" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head-muted"/></marker>
+            <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head-review"/></marker>
+            <marker id="ad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head-danger"/></marker>
+          </defs>
+          <rect class="lane" x="15" y="28" width="995" height="96" rx="6"/>
+          <text class="t-lane" x="27" y="45">AGENTS · claude -p --agent &lt;name&gt; · read-only tools · each forwards a handoff →</text>
+          <rect class="box-agent" x="30" y="56" width="140" height="52" rx="5"/><text class="t-name" x="100" y="78" text-anchor="middle">module-scout</text><text class="t-sub" x="100" y="96" text-anchor="middle">picks module + stories</text>
+          <rect class="box-agent" x="195" y="56" width="140" height="52" rx="5"/><text class="t-name" x="265" y="78" text-anchor="middle">requirements-analyst</text><text class="t-sub" x="265" y="96" text-anchor="middle">fixes triage, AC gaps</text>
+          <rect class="box-agent" x="360" y="56" width="140" height="52" rx="5"/><text class="t-name" x="430" y="78" text-anchor="middle">code-analyst</text><text class="t-sub" x="430" y="96" text-anchor="middle">keep / drop / bug</text>
+          <rect class="box-agent" x="525" y="56" width="140" height="52" rx="5"/><text class="t-name" x="595" y="78" text-anchor="middle">coverage-matcher</text><text class="t-sub" x="595" y="96" text-anchor="middle">re-checks verdicts</text>
+          <rect class="box-agent" x="690" y="56" width="140" height="52" rx="5"/><text class="t-name" x="760" y="78" text-anchor="middle">test-designer</text><text class="t-sub" x="760" y="96" text-anchor="middle">folder, priority, extend</text>
+          <rect class="box-agent" x="855" y="56" width="140" height="52" rx="5"/><text class="t-name" x="925" y="78" text-anchor="middle">reporter</text><text class="t-sub" x="925" y="96" text-anchor="middle">executive summary</text>
+          <line class="ar" x1="171" y1="82" x2="193" y2="82" marker-end="url(#a)"/>
+          <line class="ar" x1="336" y1="82" x2="358" y2="82" marker-end="url(#a)"/>
+          <line class="ar" x1="501" y1="82" x2="523" y2="82" marker-end="url(#a)"/>
+          <line class="ar" x1="666" y1="82" x2="688" y2="82" marker-end="url(#a)"/>
+          <line class="ar" x1="831" y1="82" x2="853" y2="82" marker-end="url(#a)"/>
+          <line class="ar" x1="100" y1="109" x2="100" y2="216" marker-end="url(#a)"/>
+          <text class="t-sub" x="106" y="168">runs scope</text>
+          <line class="ar-muted" x1="265" y1="216" x2="265" y2="110" marker-end="url(#am)"/>
+          <line class="ar-muted" x1="430" y1="216" x2="430" y2="110" marker-end="url(#am)"/>
+          <line class="ar-muted" x1="595" y1="216" x2="595" y2="110" marker-end="url(#am)"/>
+          <line class="ar-muted" x1="760" y1="216" x2="760" y2="110" marker-end="url(#am)"/>
+          <line class="ar-muted" x1="925" y1="216" x2="925" y2="110" marker-end="url(#am)"/>
+          <text class="t-sub" x="271" y="168">inspect</text>
+          <line class="ar-review" x1="140" y1="109" x2="218" y2="215" marker-end="url(#ar)"/>
+          <line class="ar-review" x1="305" y1="109" x2="383" y2="215" marker-end="url(#ar)"/>
+          <line class="ar-review" x1="470" y1="109" x2="548" y2="215" marker-end="url(#ar)"/>
+          <line class="ar-review" x1="635" y1="109" x2="713" y2="215" marker-end="url(#ar)"/>
+          <line class="ar-review" x1="800" y1="109" x2="878" y2="215" marker-end="url(#ar)"/>
+          <rect class="lane" x="15" y="192" width="995" height="96" rx="6"/>
+          <rect class="box" x="30" y="218" width="140" height="56" rx="5"/><text class="t-name" x="100" y="241" text-anchor="middle">1 scope</text><text class="t-sub" x="100" y="260" text-anchor="middle">0 tokens</text>
+          <rect class="box" x="195" y="218" width="140" height="56" rx="5"/><text class="t-name" x="265" y="241" text-anchor="middle">2 requirements</text><text class="t-llm" x="265" y="260" text-anchor="middle">haiku + sonnet</text>
+          <rect class="box" x="360" y="218" width="140" height="56" rx="5"/><text class="t-name" x="430" y="241" text-anchor="middle">3 code</text><text class="t-llm" x="430" y="260" text-anchor="middle">sonnet</text>
+          <rect class="box" x="525" y="218" width="140" height="56" rx="5"/><text class="t-name" x="595" y="241" text-anchor="middle">4 match</text><text class="t-llm" x="595" y="260" text-anchor="middle">opus</text>
+          <rect class="box" x="690" y="218" width="140" height="56" rx="5"/><text class="t-name" x="760" y="241" text-anchor="middle">5 draft</text><text class="t-llm" x="760" y="260" text-anchor="middle">sonnet</text>
+          <rect class="box" x="855" y="218" width="140" height="56" rx="5"/><text class="t-name" x="925" y="241" text-anchor="middle">6 report</text><text class="t-sub" x="925" y="260" text-anchor="middle">0 tokens</text>
+          <line class="ar" x1="171" y1="246" x2="193" y2="246" marker-end="url(#a)"/>
+          <line class="ar" x1="336" y1="246" x2="358" y2="246" marker-end="url(#a)"/>
+          <line class="ar" x1="501" y1="246" x2="523" y2="246" marker-end="url(#a)"/>
+          <line class="ar" x1="666" y1="246" x2="688" y2="246" marker-end="url(#a)"/>
+          <line class="ar" x1="831" y1="246" x2="853" y2="246" marker-end="url(#a)"/>
+          <text class="t-lane" x="1003" y="284" text-anchor="end">STAGES · run.mjs --stage · share state.json + token_log.jsonl</text>
+          <rect class="box-src" x="30" y="352" width="140" height="50" rx="5"/><text class="t-name" x="100" y="373" text-anchor="middle">Jira Cloud</text><text class="t-sub" x="100" y="390" text-anchor="middle">REST, JQL search</text>
+          <rect class="box-src" x="360" y="352" width="140" height="50" rx="5"/><text class="t-name" x="430" y="373" text-anchor="middle">Git repos</text><text class="t-sub" x="430" y="390" text-anchor="middle">sparse clone, cache/</text>
+          <rect class="box-src" x="525" y="352" width="305" height="50" rx="5"/><text class="t-name" x="677" y="373" text-anchor="middle">Zephyr Scale API</text><text class="t-sub" x="677" y="390" text-anchor="middle">case export (12 h cache) · steps (7 d cache)</text>
+          <line class="ar-muted" x1="100" y1="350" x2="100" y2="276" marker-end="url(#am)"/><text class="t-sub" x="106" y="318">stories</text>
+          <line class="ar-muted" x1="430" y1="350" x2="430" y2="276" marker-end="url(#am)"/><text class="t-sub" x="436" y="318">module code</text>
+          <line class="ar-muted" x1="595" y1="350" x2="595" y2="276" marker-end="url(#am)"/><text class="t-sub" x="601" y="318">cases + steps</text>
+          <line class="ar-muted" x1="760" y1="350" x2="760" y2="276" marker-end="url(#am)"/><text class="t-sub" x="766" y="318">folders</text>
+          <rect class="box-out" x="1035" y="56" width="150" height="52" rx="5"/><text class="t-name" x="1110" y="78" text-anchor="middle">summary.md</text><text class="t-sub" x="1110" y="96" text-anchor="middle">+ latest-summary.md</text>
+          <line class="ar" x1="996" y1="82" x2="1033" y2="82" marker-end="url(#a)"/>
+          <rect class="box-out" x="1035" y="218" width="150" height="56" rx="5"/><text class="t-name" x="1110" y="241" text-anchor="middle">Workbook .xlsx</text><text class="t-sub" x="1110" y="260" text-anchor="middle">10 sheets · 6_Gaps</text>
+          <line class="ar" x1="996" y1="246" x2="1033" y2="246" marker-end="url(#a)"/>
+          <line class="ar" x1="1110" y1="275" x2="1110" y2="350" marker-end="url(#a)"/>
+          <text class="t-sub" x="1102" y="308" text-anchor="end">you set</text>
+          <text class="t-sub" x="1102" y="322" text-anchor="end">Approve</text>
+          <rect class="box-danger" x="1035" y="352" width="150" height="50" rx="5"/><text class="t-name" x="1110" y="373" text-anchor="middle">create-approved</text><text class="t-sub" x="1110" y="390" text-anchor="middle">dry run, then --yes</text>
+          <line class="ar-danger" x1="1033" y1="377" x2="833" y2="377" marker-end="url(#ad)"/>
+          <text class="t-danger" x="932" y="369" text-anchor="middle">creates cases · no delete</text>
+        </svg>
+      </div>
+      <figcaption>Today each agent reviews its own stage and writes a review file that the next stage merges. Matching happens only after requirements and code are both done.</figcaption>
+    </figure>
+  </details>
+</main>

@@ -86,7 +86,7 @@ export function discoverImplementation(index, { seeds, links = [], tokens = [], 
     if (role === "module" || role === "core") queue.push(p);
     return true;
   };
-  for (const s of seeds) add(s, "module", 0, "module folder");
+  for (const s of seeds) typeof s === "string" ? add(s, "module", 0, "module folder") : add(s.path, "module", 0, s.via);
   for (const l of links) add(l.path, "core", 1, l.via);
 
   while (queue.length) {
@@ -197,4 +197,96 @@ export function packWithinBudget(items, budget, { reserveShare = 0.35 } = {}) {
     files.push({ path: it.path, role: it.role, content, form, via: it.via });
   }
   return { files, used, dropped };
+}
+
+// ---------------------------------------------------------------- keyword sweep
+// A feature such as "grid export" has no folder of its own: it lives in a shared service, a backend handler
+// family and every page with an Export button. The sweep finds it across all code roots by its words.
+
+const PHRASE_STOP = new Set(["to", "the", "a", "an", "of", "in", "on", "for", "and", "or", "with", "from", "by"]);
+const singularWord = (w) => (w.length > 3 ? w.replace(/ies$/, "y").replace(/(?<!s)s$/, "") : w);
+/** "exportToCsv" / "export-to-csv" / "Export to CSV" → ["export", "csv"] (lower case, singular, no filler words). */
+export function phraseWords(text) {
+  return String(text).replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .toLowerCase().split(/[^a-z0-9]+/).filter((w) => w && !PHRASE_STOP.has(w)).map(singularWord);
+}
+
+/**
+ * Does a name contain the phrase, in order and adjacent? "data export" ~ DataExportJob but not GtfsExportData:
+ * the same words in another order are usually another feature. A one-word phrase also matches a compound
+ * name ("importjob" ~ ImportJobService).
+ */
+export function wordsMatch(words, nameWords) {
+  for (let i = 0; i + words.length <= nameWords.length; i++) if (words.every((w, j) => nameWords[i + j] === w)) return true;
+  return words.length === 1 && words[0].length >= 6 && nameWords.join("").includes(words[0]);
+}
+
+/**
+ * Where one file names each phrase. strong: the file name or a type the file declares contains every word
+ * of the phrase (ExportJobService for "export job"). mention: an identifier it uses, or a comment / string
+ * literal containing the words in order. Language keywords never count: TS `export class` is not "export".
+ * Returns [{ phrase, strong, count }] for the phrases the file names.
+ */
+export function keywordHits(filePath, content, phrases) {
+  const declared = [baseName(filePath), ...parseSource(filePath, content).declares].map(phraseWords);
+  const code = content.replace(NOISE, " ");
+  const idents = [...new Set(code.match(/[A-Za-z_$][\w$]*/g) ?? [])].filter((n) => /[a-z][A-Z]|[A-Za-z]_[A-Za-z]|^[A-Z][a-z]/.test(n)).map(phraseWords);
+  const prose = (content.match(NOISE) ?? []).map((t) => " " + phraseWords(t).join(" ") + " ").join("\n");
+  const out = [];
+  for (const phrase of phrases) {
+    const words = phraseWords(phrase);
+    if (!words.length) continue;
+    const all = (ws) => wordsMatch(words, ws);
+    const strong = declared.some(all);
+    let count = idents.filter(all).length;
+    // Single words in prose over-match ("export" in every comment); prose counts for phrases of 2+ words.
+    if (words.length > 1) count += prose.split(" " + words.join(" ") + " ").length - 1;
+    if (strong || count) out.push({ phrase, strong, count: count + (strong ? 1 : 0) });
+  }
+  return out;
+}
+
+/**
+ * Sweep parsed files ({path, content}) for the phrases. Files that declare a matching type become seeds of
+ * implementation discovery; files that only mention a phrase are listed by hit count. A phrase that declares
+ * in more than maxSeedsPerPhrase files is too generic to seed ("data export"): its files are mentions only.
+ */
+export function sweepKeywords(files, phrases, { maxSeedsPerPhrase = 25, maxMentions = 60 } = {}) {
+  const hits = files.map((f) => ({ path: f.path, hits: keywordHits(f.path, f.content, phrases) })).filter((f) => f.hits.length);
+  const perPhrase = new Map(phrases.map((p) => [p, { phrase: p, strong: 0, files: 0 }]));
+  for (const f of hits) for (const h of f.hits) { const s = perPhrase.get(h.phrase); s.files++; if (h.strong) s.strong++; }
+  const generic = [...perPhrase.values()].filter((s) => s.strong > maxSeedsPerPhrase);
+  const tooGeneric = new Set(generic.map((s) => s.phrase));
+  const seeds = [];
+  const mentions = [];
+  for (const f of hits) {
+    const seedBy = f.hits.filter((h) => h.strong && !tooGeneric.has(h.phrase)).map((h) => h.phrase);
+    const count = f.hits.reduce((n, h) => n + h.count, 0);
+    if (seedBy.length) seeds.push({ path: f.path, phrases: seedBy, count });
+    else mentions.push({ path: f.path, phrases: f.hits.map((h) => h.phrase), count });
+  }
+  mentions.sort((a, b) => b.count - a.count || a.path.localeCompare(b.path));
+  return { seeds, mentions: mentions.slice(0, maxMentions), moreMentions: Math.max(0, mentions.length - maxMentions), stats: [...perPhrase.values()], generic };
+}
+
+/** The lines of a file that name a phrase (identifier, comment or text), with one line of context each. */
+export function mentionSnippet(content, phrases, { max = 600 } = {}) {
+  const wanted = phrases.map(phraseWords).filter((w) => w.length);
+  const lines = content.split("\n");
+  const hit = (line) => {
+    const idents = (line.match(/[A-Za-z_$][\w$]*/g) ?? []).map(phraseWords);
+    const flat = " " + phraseWords(line).join(" ") + " ";
+    return wanted.some((w) => idents.some((u) => wordsMatch(w, u)) || (w.length > 1 && flat.includes(" " + w.join(" ") + " ")));
+  };
+  const pick = new Set();
+  lines.forEach((l, i) => { if (hit(l)) for (const j of [i - 1, i, i + 1]) if (lines[j]?.trim()) pick.add(j); });
+  let text = "";
+  let prev = -2;
+  for (const i of [...pick].sort((a, b) => a - b)) {
+    const line = (i > prev + 1 && text ? "…\n" : "") + lines[i].trim() + "\n";
+    if (text.length + line.length > max) { text += "…"; break; }
+    text += line;
+    prev = i;
+  }
+  return text.trim();
 }

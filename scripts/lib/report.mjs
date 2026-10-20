@@ -4,6 +4,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { summarizeTokens } from "./tokens.mjs";
 import { writeJson } from "./util.mjs";
+import { OUTPUT_VERSION } from "./run-outputs.mjs";
+import { SHEETS } from "./workbook.mjs";
 
 const n = (x) => Number(x ?? 0).toLocaleString("en-US");
 
@@ -48,6 +50,24 @@ export function renderSummary({ ctx, built, workbookPath, handoffs = [] }) {
   L.push(`|---|---|---|---|---|---|---|---|---|---|---|`);
   L.push(`| ${all.length} | ${testable.length} | ${all.filter((r) => r.triage?.testable === false && !r.dropped).length} | ${all.filter((r) => r.triage?.testable === null && !r.dropped).length} | ${all.filter((r) => r.dropped).length} | ${built?.counts.expected ?? testable.reduce((s, r) => s + r.expected.length, 0)} | ${count("Covered")} | ${count("Partial")} | ${count("Missing")} | ${cov === null ? "—" : `${cov}%`} | ${gaps.length} |`);
   L.push("");
+  const designed = state.testDesign?.cases ?? [];
+  if (designed.length) {
+    const dc = (v) => designed.filter((c) => c.check?.verdict === v).length;
+    L.push(`### Test design from the module context (${SHEETS.design})`);
+    L.push(`| Designed cases | Covered by existing cases | Partly covered | Missing | Coverage |`);
+    L.push(`|---|---|---|---|---|`);
+    L.push(`| ${designed.length} | ${dc("Covered")} | ${dc("Partial")} | ${dc("Missing")} | ${Math.round((100 * (dc("Covered") + 0.5 * dc("Partial"))) / designed.length)}% |`);
+    L.push("");
+    const notCovered = designed.filter((c) => c.check?.verdict !== "Covered");
+    if (notCovered.length) {
+      L.push("**Should be tested, but no existing case does it:**");
+      for (const c of notCovered.slice(0, 30)) {
+        L.push(`- \`${c.tcId}\` ${c.title} — ${c.check.verdict}${c.check.matchedKeys?.length ? ` (partly ${c.check.matchedKeys.join(", ")})` : ""}. ${c.whyNeeded}${c.basis.length ? ` _(${c.basis.join(", ")})_` : ""}`);
+      }
+      if (notCovered.length > 30) L.push(`- … ${notCovered.length - 30} more in ${SHEETS.design}`);
+      L.push("");
+    }
+  }
   if (gaps.length) {
     L.push("### Gaps by suggested decision");
     for (const d of ["Approve", "Review", "Reject"]) {
@@ -55,7 +75,7 @@ export function renderSummary({ ctx, built, workbookPath, handoffs = [] }) {
       if (!list.length) continue;
       L.push(`**${d} (${list.length})**`);
       for (const g of list.slice(0, 25)) L.push(`- \`${g.gapId}\` ${g.verdict}: ${g.draft?.name ?? g.scenario}${g.codeReview ? ` _(${g.codeReview})_` : ""}`);
-      if (list.length > 25) L.push(`- … ${list.length - 25} more in the workbook (6_Gaps)`);
+      if (list.length > 25) L.push(`- … ${list.length - 25} more in the workbook (${SHEETS.gaps})`);
       L.push("");
     }
   }
@@ -97,19 +117,20 @@ export function renderSummary({ ctx, built, workbookPath, handoffs = [] }) {
   if (testable.length) L.push(`\nTokens per testable story: ${n(Math.round(tok.total.total_tokens / testable.length))} (pipeline ${n(Math.round(tok.pipeline.total_tokens / testable.length))}).`);
   L.push("");
   L.push("## Next");
-  L.push("1. Open the workbook, sheet `6_Gaps`: set **Review decision** per row (pre-filled with the suggestion).");
+  L.push(`1. Open the workbook, sheet \`${SHEETS.gaps}\`: set **Review decision** per row (pre-filled with the suggestion).`);
   L.push(`2. Dry run: \`node scripts/run.mjs --create-approved "${workbookPath}"\` — then add \`--yes\` to create. Zephyr has no delete.`);
   return { text: L.join("\n") + "\n", tok };
 }
 
-export function writeSummary({ ctx, built, workbookPath, handoffs }) {
+/** summary.md and summary.json; `run` and `files` are the header and file index shared by the run's JSON files (run-outputs.mjs). */
+export function writeSummary({ ctx, built, workbookPath, handoffs, run, files }) {
   const { text, tok } = renderSummary({ ctx, built, workbookPath, handoffs });
   const file = path.join(ctx.runDir, "summary.md");
   fs.writeFileSync(file, text);
   fs.writeFileSync(path.join(path.dirname(ctx.runDir), "latest-summary.md"), text);
   writeJson(path.join(ctx.runDir, "summary.json"), {
-    runAt: ctx.state.runAt, profile: ctx.profile.name, scope: ctx.state.scope, counts: built?.counts ?? null,
-    tokens: { total: tok.total, pipeline: tok.pipeline, agents: tok.agents, byStage: tok.byStage }, workbook: workbookPath,
+    version: OUTPUT_VERSION, run, files, counts: built?.counts ?? null,
+    tokens: { total: tok.total, pipeline: tok.pipeline, agents: tok.agents, byStage: tok.byStage },
   });
   return { file, text };
 }

@@ -12,13 +12,17 @@ Tool: Jira stories + source code vs Zephyr Scale → Excel (see README.md). Proj
 - Secrets live in `.env` / `zephyr_mcp/.env`. Never print or copy them.
 
 ## Agents
-- `.claude/agents/*.md` define the six chain agents. Their tool lists must include `StructuredOutput`.
+- `config/config.yaml` holds the pipeline (phases and their agents), environments, scope filters and agent
+  options. `.claude/agents/*.md` define the nine agents. Their tool lists must include `StructuredOutput`.
   Without it, a headless `--json-schema` run returns nothing, and leaving out the tool list loads every tool
   (about 150k tokens per call).
-- Agents change state only through `review/<key>.json` (schemas in `schema/review/`), which the next stage
-  merges. Never let an agent edit `state.json` or the workbook.
+- Agents change state only through `review/<key>.json` (schemas in `schema/review/`), which a later stage
+  merges (the four explorers' reviews merge in the context stage). Never let an agent edit `state.json` or the workbook.
 - The allowlists live in `allowedTools()` in `scripts/agents.mjs`. Keep them exact: own stage only,
-  read-only Zephyr tools.
+  read-only Zephyr tools, Playwright tools only for `ui-explorer` and only those of its configured mode
+  (`uiTools()` in `scripts/lib/pipeline.mjs`).
+- The UI explorer never changes data on an environment without `allowWrites: true`; read-only mode blocks the
+  page's writes with an init script. Saved logins (`cache/<profile>/ui/`) are secrets: agents may not read them.
 
 ## Conventions in this repo
 - Report **tokens only**. No cost or USD fields in logs, the workbook or summaries (a test enforces this).

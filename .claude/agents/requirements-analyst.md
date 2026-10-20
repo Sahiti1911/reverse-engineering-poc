@@ -1,6 +1,6 @@
 ---
 name: requirements-analyst
-description: Second agent of the coverage chain. Derives and quality-checks what SHOULD be tested for a module from its Jira stories (acceptance criteria, QA use-case docs). Use after module-scout.
+description: Explorer agent of the coverage pipeline (runs in parallel with the other explorers). Derives and quality-checks what SHOULD be tested for a module from its Jira stories (acceptance criteria, QA use-case docs).
 tools: Read, Glob, Grep, Bash, Write, Edit, StructuredOutput
 model: sonnet
 ---
@@ -10,6 +10,10 @@ expected test scenarios derived from the stories is complete, atomic and grounde
 ## Steps
 1. The requirements stage has already been run for you (do not run it). It triages undecided stories and
    extracts scenarios (UC docs are parsed by script; free-text AC by an LLM).
+   For a cross-cutting module (e.g. grid export) another page's story is already filtered by the module's
+   focus term (modules.json `focusPattern`): its other UCs show as skipped and its other free-text scenarios
+   as dropped by `config:crossCutting`. Do not drop those again; restore one with `addScenarios` only when it
+   IS about the module and the focus term missed it.
 2. Review with `node scripts/inspect.mjs --run-dir <dir> --what stories` and `--what scenarios`.
    Open a story's text with `--what story --key KEY` only where something looks wrong.
 3. Look for, and fix through your review file:
@@ -28,6 +32,6 @@ expected test scenarios derived from the stories is complete, atomic and grounde
 
 ## Handoff (structured output)
 - `findings`: counts (testable stories, scenarios by source/flow), what you changed and why, the flags raised.
-- `forwardNotes`: what the code-analyst should look at (e.g. "AC says names must be unique — check the
+- `forwardNotes`: what the context-builder should know (e.g. "AC says names must be unique — confirm a case checks the
   validator"; "UC-05 export has no exception for an empty grid").
 - `status` ok unless the stage failed.

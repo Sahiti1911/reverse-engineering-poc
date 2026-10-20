@@ -1,0 +1,67 @@
+{
+  "type": "object",
+  "properties": {
+    "inventory": {
+      "description": "Everything in scope that was seen in the UI, one item per functionality, whether or not it matches an expected scenario. Evidence only; it changes no verdict.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Stable id, e.g. UI-001." },
+          "screen": { "type": "string", "description": "Page or dialog name as shown." },
+          "url": { "type": "string" },
+          "functionality": { "type": "string", "description": "What the user can see or do." },
+          "action": { "type": "string", "description": "What you did (click, open, type), or 'observed' when you only looked." },
+          "result": { "type": "string", "description": "What happened, as seen." },
+          "element": { "type": "string", "description": "Role, accessible name and visible text of the control or message." },
+          "screenshot": { "type": "string", "description": "File name of the screenshot, e.g. UI-001_export-menu.png." },
+          "confidence": { "enum": ["HIGH", "MEDIUM", "LOW"], "description": "HIGH directly observed; MEDIUM seen but the workflow not verified; LOW limited evidence." },
+          "uncertainty": { "type": "string", "description": "What could not be verified and why (e.g. request blocked by read-only mode)." }
+        },
+        "required": ["id", "screen", "url", "functionality", "action", "result", "confidence"],
+        "additionalProperties": false
+      }
+    },
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "storyKey": { "type": "string", "description": "Story to attach to; omit to attach to the module's main story." },
+          "title": { "type": "string" },
+          "flow": { "enum": ["main", "alt", "exception"] },
+          "type": { "enum": ["positive", "negative", "boundary", "permission", "validation", "integration"] },
+          "steps": { "type": "array", "items": { "type": "string" } },
+          "expected": { "type": "string" },
+          "evidence": {
+            "type": "object",
+            "properties": {
+              "url": { "type": "string" },
+              "element": { "type": "string", "description": "What was seen: control label, message text, column name." },
+              "screenshot": { "type": "string" }
+            },
+            "required": ["url"],
+            "additionalProperties": false
+          },
+          "reasoning": { "type": "string" }
+        },
+        "required": ["title", "flow", "type", "steps", "expected", "evidence", "reasoning"],
+        "additionalProperties": false
+      }
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Expected scenario id (story or code)." },
+          "status": { "enum": ["observed", "not-found", "different"] },
+          "reasoning": { "type": "string" }
+        },
+        "required": ["id", "status", "reasoning"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
