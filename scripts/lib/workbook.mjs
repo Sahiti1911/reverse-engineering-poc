@@ -66,13 +66,14 @@ function addTable(wb, name, columns, rows, { freeze = true } = {}) {
  * pipeline run), so the numbers never shift between runs.
  */
 export const SHEETS = {
-  context: "1_Module_Context", triage: "2_Story_Triage", links: "3_Link_Check", expected: "4_Expected_Scenarios",
-  ui: "5_UI_Exploration", cases: "6_Zephyr_Cases", matching: "7_Matching", design: "8_Test_Design", gaps: "9_Gaps",
-  orphans: "10_Orphan_Zephyr", agents: "11_Agents", reviews: "12_Agent_Reviews", runLog: "13_Run_Log", tokens: "14_Token_Usage",
+  context: "1_Module_Context", featureMap: "2_Feature_Map", triage: "3_Story_Triage", links: "4_Link_Check", expected: "5_Expected_Scenarios",
+  ui: "6_UI_Exploration", cases: "7_Zephyr_Cases", matching: "8_Matching", design: "9_Test_Design", gaps: "10_Gaps",
+  orphans: "11_Orphan_Zephyr", agents: "12_Agents", reviews: "13_Agent_Reviews", runLog: "14_Run_Log", tokens: "15_Token_Usage",
 };
 
 const SHEET_INFO = {
   context: "What the feature is: screens, workflows, rules, APIs, exact UI texts, test data, open questions (context-builder)",
+  featureMap: "Every implementation (surface) of a cross-cutting feature: its code in each layer, UI page, Confluence, stories, Zephyr cases, and what is missing",
   triage: "Each story: testable or not, module source, AC quality flags",
   links: "Zephyr cases already linked to each story or a related story",
   expected: "What should be tested (story / code / UI), evidence, agent review",
@@ -89,13 +90,40 @@ const SHEET_INFO = {
 };
 const AGENT_ONLY = new Set(["context", "ui", "design", "agents", "reviews"]);
 
-/** Review sections that have their own sheet; 11_Agent_Reviews shows one pointer row for them instead of a copy. */
+/** Review sections that have their own sheet; 13_Agent_Reviews shows one pointer row for them instead of a copy. */
 const OWN_SHEET = {
   "context-builder": { moduleContext: SHEETS.context },
   "ui-explorer": { inventory: SHEETS.ui, observations: SHEETS.ui, scenarios: SHEETS.ui },
 };
 
-/** 8_Test_Design rows: every designed case with its coverage verdict and, when not covered, its gap id. */
+/**
+ * 2_Feature_Map rows: one per surface (code layers, UI page, cases, stories, Confluence, status), then shared
+ * behaviour, UI pages no surface claims and items that are not this feature. Empty without a feature map.
+ */
+export function featureMapRows(featureMap) {
+  if (!featureMap) return [];
+  const base = (path) => path.split("/").pop();
+  const titleOf = new Map((featureMap.confluence ?? []).map((p) => [p.id, p.title]));
+  const rows = featureMap.surfaces.map((s) => ({
+    kind: "surface", surface: s.name, id: s.id ?? "", label: s.label, status: s.status,
+    backend: s.code.backend.map(base).join("\n"), legacy: s.code.legacy.map(base).join("\n"), frontend: s.code.frontend.map(base).join("\n"),
+    ui: s.ui.map((u) => `${u.title || ""} ${u.route}${u.columnsMatch === false ? " — grid shows a column the export leaves out" : ""}`.trim()).join("\n"),
+    cases: s.cases.length, caseKeys: s.cases.join(", "), stories: s.stories.join(", "),
+    confluence: s.confluence.map((id) => titleOf.get(id) ?? id).join("\n"), note: s.note ?? "", reasoning: s.reasoning,
+  }));
+  if (featureMap.shared.cases.length || featureMap.shared.confluence.length) {
+    rows.push({ kind: "shared", surface: "(shared)", label: "About the feature as a whole, no single surface", cases: featureMap.shared.cases.length, caseKeys: featureMap.shared.cases.join(", "),
+      confluence: featureMap.shared.confluence.map((id) => titleOf.get(id) ?? id).join("\n"), reasoning: "Cases and pages that name no single surface: they test or describe the common behaviour." });
+  }
+  for (const b of featureMap.sharedBehaviours ?? []) rows.push({ kind: "shared behaviour", surface: b.id, label: b.title, note: b.detail, reasoning: `${b.reasoning} Sources: ${b.sources.join(", ")}.` });
+  for (const u of featureMap.unmatchedUi ?? []) rows.push({ kind: "UI unmatched", surface: u.route, label: u.title, reasoning: u.reasoning });
+  for (const n of featureMap.notThis.surfaces) rows.push({ kind: "not this feature", surface: n.name, reasoning: n.reasoning });
+  for (const n of featureMap.notThis.cases) rows.push({ kind: "not this feature", surface: n.key, label: "Zephyr case", reasoning: n.reasoning });
+  for (const n of featureMap.notThis.confluence) rows.push({ kind: "not this feature", surface: n.id, label: n.title ?? "Confluence page", reasoning: n.reasoning });
+  return rows;
+}
+
+/** 9_Test_Design rows: every designed case with its coverage verdict and, when not covered, its gap id. */
 export function testDesignRows(testDesign, urls) {
   return (testDesign?.cases ?? []).map((tc) => ({
     tcId: tc.tcId, story: tc.storyKey, storyUrl: urls.jira(tc.storyKey), title: tc.title, whyNeeded: tc.whyNeeded,
@@ -106,7 +134,7 @@ export function testDesignRows(testDesign, urls) {
   }));
 }
 
-/** 11_Agents rows: one per configured agent, in pipeline order. */
+/** 12_Agents rows: one per configured agent, in pipeline order. */
 export function agentRows(agents = []) {
   return agents.map((a) => ({
     ...a, duration: Math.round((a.durationMs ?? 0) / 1000), reusedFrom: a.reusedFrom ? `earlier run ${a.reusedFrom}` : "this run",
@@ -114,7 +142,7 @@ export function agentRows(agents = []) {
   }));
 }
 
-/** 12_Agent_Reviews rows: every review item, except sections shown in their own sheet (one pointer row each). */
+/** 13_Agent_Reviews rows: every review item, except sections shown in their own sheet (one pointer row each). */
 export function agentReviewRows(agents = []) {
   return agents.flatMap((a) => {
     if (!a.review) return [];
@@ -127,7 +155,7 @@ export function agentReviewRows(agents = []) {
   });
 }
 
-/** 5_UI_Exploration rows. A screenshot links only when the file is in ui/; images no row refers to are listed last. */
+/** 6_UI_Exploration rows. A screenshot links only when the file is in ui/; images no row refers to are listed last. */
 export function uiEvidenceRows(ui) {
   if (!ui) return [];
   const saved = new Set(ui.screenshots);
@@ -160,7 +188,7 @@ function checkReasoning(sheet, rows, key, idKey) {
   return rows.filter((r) => !String(r[key] ?? "").trim()).map((r) => `${sheet}: ${r[idKey]} has no ${key}`);
 }
 
-/** Read the 9_Gaps sheet back as objects keyed by header text (used by re-runs and create-approved). Older workbooks call it 8_Gaps or 6_Gaps. */
+/** Read the 10_Gaps sheet back as objects keyed by header text (used by re-runs and create-approved). Older workbooks call it 9_Gaps, 8_Gaps or 6_Gaps. */
 export async function readGapSheet(file) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(file);
@@ -179,7 +207,7 @@ export async function readGapSheet(file) {
   return { wb, ws, headers, rows, profileName: wb.subject };
 }
 
-export async function buildWorkbook({ file, profile, scope, stories, zephyr, tokenRecords, runLog, runInfo, urls, handoffs = [], agentResults = null, moduleContext = null, testDesign = null }) {
+export async function buildWorkbook({ file, profile, scope, stories, zephyr, tokenRecords, runLog, runInfo, urls, handoffs = [], agentResults = null, moduleContext = null, testDesign = null, featureMap = null }) {
   const wb = new ExcelJS.Workbook();
   wb.creator = "coverage-gap-analysis";
   wb.subject = profile.name;
@@ -306,6 +334,8 @@ export async function buildWorkbook({ file, profile, scope, stories, zephyr, tok
     }
   }
   problems.push(...checkReasoning(SHEETS.orphans, orphanRows, "reasoning", "key"));
+  const mapRows = featureMapRows(featureMap);
+  problems.push(...checkReasoning(SHEETS.featureMap, mapRows, "reasoning", "surface"));
 
   if (problems.length) {
     const err = new Error(`Workbook rejected: ${problems.length} row(s) without reasoning:\n  ${problems.slice(0, 20).join("\n  ")}`);
@@ -319,7 +349,7 @@ export async function buildWorkbook({ file, profile, scope, stories, zephyr, tok
   const agentSheetRows = agentRows(agentResults?.agents);
   const reviewRows = agentReviewRows(agentResults?.agents);
   const rowCount = {
-    context: contextRows.length, triage: triageRows.length, links: linkRows.length, expected: expectedRows.length, ui: uiRows.length,
+    context: contextRows.length, featureMap: mapRows.length, triage: triageRows.length, links: linkRows.length, expected: expectedRows.length, ui: uiRows.length,
     cases: caseRows.length, matching: matchRows.length, design: designRows.length, gaps: gapRows.length, orphans: orphanRows.length, agents: agentSheetRows.length,
     reviews: reviewRows.length, runLog: runLog.length, tokens: tokenRecords.length,
   };
@@ -429,6 +459,16 @@ export async function buildWorkbook({ file, profile, scope, stories, zephyr, tok
     { header: "Detail / expected", key: "detail", width: 70, wrap: true }, { header: "Status", key: "status", width: 18 },
     { header: "Sources", key: "sources", width: 40, wrap: true },
   ], contextRows);
+
+  addTable(wb, SHEETS.featureMap, [
+    { header: "Kind", key: "kind", width: 14 }, { header: "Surface", key: "surface", width: 34 }, { header: "ID", key: "id", width: 6 },
+    { header: "Label", key: "label", width: 26, wrap: true }, { header: "Status", key: "status", width: 24, wrap: true },
+    { header: "Backend", key: "backend", width: 30, wrap: true }, { header: "Legacy UI", key: "legacy", width: 30, wrap: true },
+    { header: "New UI", key: "frontend", width: 30, wrap: true }, { header: "UI page (sweep)", key: "ui", width: 34, wrap: true },
+    { header: "# cases", key: "cases", width: 8 }, { header: "Zephyr cases", key: "caseKeys", width: 30, wrap: true },
+    { header: "Stories", key: "stories", width: 16, wrap: true }, { header: "Confluence", key: "confluence", width: 26, wrap: true },
+    { header: "Note", key: "note", width: 40, wrap: true }, { header: "Reasoning", key: "reasoning", width: 70, wrap: true },
+  ], mapRows);
 
   addTable(wb, SHEETS.triage, [
     { header: "Key", key: "key", width: 13, link: "url" }, { header: "Summary", key: "summary", width: 50, wrap: true },

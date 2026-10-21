@@ -13,7 +13,7 @@ Tool: Jira stories + source code vs Zephyr Scale → Excel (see README.md). Proj
 
 ## Agents
 - `config/config.yaml` holds the pipeline (phases and their agents), environments, scope filters and agent
-  options. `.claude/agents/*.md` define the nine agents. Their tool lists must include `StructuredOutput`.
+  options. `.claude/agents/*.md` define the ten agents. Their tool lists must include `StructuredOutput`.
   Without it, a headless `--json-schema` run returns nothing, and leaving out the tool list loads every tool
   (about 150k tokens per call).
 - Agents change state only through `review/<key>.json` (schemas in `schema/review/`), which a later stage
@@ -23,6 +23,8 @@ Tool: Jira stories + source code vs Zephyr Scale → Excel (see README.md). Proj
   (`uiTools()` in `scripts/lib/pipeline.mjs`).
 - The UI explorer never changes data on an environment without `allowWrites: true`; read-only mode blocks the
   page's writes with an init script. Saved logins (`cache/<profile>/ui/`) are secrets: agents may not read them.
+- The UI sweep (`scripts/lib/ui-sweep.mjs`, map stage) clicks the feature's trigger on every page. It must always
+  abort the feature request after recording it, and abort every other write that is not an allowed read. Never relax this.
 
 ## Conventions in this repo
 - Report **tokens only**. No cost or USD fields in logs, the workbook or summaries (a test enforces this).

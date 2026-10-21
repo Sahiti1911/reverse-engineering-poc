@@ -67,6 +67,13 @@
       }
     ]
   },
+  "confluence": {
+    "spaces": [],
+    "titleExclude": ["passbolt", "recovery kit", "accessibility report"],
+    "changeHistoryPattern": "release notes?",
+    "maxPages": 25,
+    "maxCharsPerPage": 20000
+  },
   "zephyr": {
     "projectKey": "QA",
     "region": "eu",

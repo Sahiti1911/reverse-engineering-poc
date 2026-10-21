@@ -26,22 +26,23 @@ export function runHeader({ runDir, state, profile }) {
 }
 
 /** Index of the run's output files; an entry is null when this run has no such output. */
-export function runFiles({ runDir, workbookPath, agentRun = false, hasContext = false, hasUi = false }) {
+export function runFiles({ runDir, workbookPath, agentRun = false, hasContext = false, hasUi = false, hasMap = false, hasSweep = false }) {
   return {
     workbook: rel(runDir, workbookPath),
     summary: "summary.md", summaryJson: "summary.json", coverage: "coverage.json",
     agents: agentRun ? "agents.json" : null,
     moduleContext: hasContext ? "module-context.json" : null, moduleContextBrief: hasContext ? "module-context.md" : null,
     ui: hasUi ? "ui/" : null, reviews: agentRun ? "review/" : null, handoffs: agentRun ? "handoff/" : null,
-    stories: "stories/", tokenLog: "token_log.jsonl",
+    featureMap: hasMap ? "map/" : null, uiSweep: hasSweep ? "ui-sweep/" : null, stories: "stories/", tokenLog: "token_log.jsonl",
   };
 }
 
 /** coverage.json from the run state's story records (ordered as in the workbook). */
-export function coverageJson({ run, files, counts = null, moduleContext = null, testDesign = null, ui = null, stories }) {
+export function coverageJson({ run, files, counts = null, moduleContext = null, featureMap = null, testDesign = null, ui = null, stories }) {
   return {
     version: OUTPUT_VERSION, run, files, counts,
     moduleContext,
+    featureMap,
     testDesign,
     ui: ui && {
       inventory: ui.inventory, observations: ui.observations, scenarios: ui.scenarios,

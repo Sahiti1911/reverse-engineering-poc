@@ -37,13 +37,14 @@ scope:
   baseline: none                        # last-run = only stories updated since the previous run of this scope
 pipeline:                               # phases in order; agents of one phase run in parallel
   - { phase: scope,    agents: [module-scout] }
+  - { phase: map,      agents: [feature-mapper] }        # cross-cutting modules: every implementation of the feature
   - { phase: explore,  agents: [requirements-analyst, code-analyst, ui-explorer, zephyr-explorer] }
   - { phase: context,  agents: [context-builder] }
   - { phase: design,   agents: [test-designer] }
   - { phase: validate, agents: [coverage-validator] }
   - { phase: report,   agents: [reporter] }
 agents:
-  ui-explorer: { mode: read-only, maxPages: 8 }   # observe | read-only | full
+  ui-explorer: { mode: read-only, maxPages: 8, sweep: { maxPages: 200 } }   # observe | read-only | full; sweep = map stage
   coverage-validator: { maxRounds: 1 }            # redesign rounds with the test-designer
 ```
 
@@ -51,11 +52,12 @@ Remove an agent to switch that part off: without `ui-explorer` nothing opens a b
 the code is not read. `module-scout`, `requirements-analyst` and `context-builder` are required. The same file holds
 the stage tuning that used to be in `config/run.json` (models, batches, limits, token budget).
 
-### The nine agents
+### The ten agents
 
 | Phase | Agent | Job | Writes |
 |---|---|---|---|
 | scope | `module-scout` | Plain words → code module, keywords, story set (Done only when configured). Stops and asks when the name is ambiguous. | `scout.json` |
+| map | `feature-mapper` | Cross-cutting modules: checks the **feature map**, every implementation (surface) of the feature with its code in each layer, UI page, Confluence pages, stories and Zephyr cases; explains what is missing, drops look-alikes, lists shared behaviour (see [Every implementation of a feature](#every-implementation-of-a-feature-the-feature-map)) | `map.json` |
 | explore | `requirements-analyst` | What *should* be tested: fixes triage, adds missed AC scenarios, flags vague AC | `requirements.json` |
 | explore | `code-analyst` | Code-derived edge cases: keep / drop / needs PO confirmation, **suspected bugs** | `code.json` |
 | explore | `ui-explorer` | Opens the module's screens with Playwright MCP: what a tester sees, whether expected scenarios show up | `ui.json` |
@@ -84,7 +86,8 @@ Every run gets its own folder, `runs/<profile>/<date>_agents-<module>_vNNN/`, so
 - `summary.md`, also copied to `runs/<profile>/latest-summary.md`
 - the workbook and `coverage.json` (the same results as JSON), `agents.json`, `summary.json`,
   `module-context.json` / `.md` (see [JSON files](#json-files))
-- `handoff/NN-<agent>.json`: what each agent found and forwarded
+- `handoff/<agent>.json`: what each agent found and forwarded (`NN-<agent>.json` in runs made before the map phase)
+- `map/` (`zephyr-pool.json`, `confluence.json`) and `ui-sweep/` (`sweep.json` + screenshots): what the map stage gathered
 - `review/<agent>.json`: the changes each agent made, merged by a later stage and labelled `agent:<name>`
 - `ui/`: screenshots (moved here after the UI explorer finishes; Playwright saves them in the working directory),
   page snapshots, console logs and the read-only init script; `mcp.json`: the MCP servers of this run
@@ -137,13 +140,37 @@ The words don't have to name a folder. A cross-cutting feature such as "grid dat
 - **Stories: Rovo.** JQL finds stories that contain a keyword. Rovo (Atlassian semantic search) also finds
   stories worded differently. Headless agents can't use claude.ai connectors, so `/coverage` runs up to 3 Rovo
   searches in your session first, writes `runs/<profile>/rovo/<module>.json` and passes it as
-  `--extra-stories`. Those stories show module source `rovo` in `2_Story_Triage` and the run log, and the
+  `--extra-stories`. Those stories show module source `rovo` in `3_Story_Triage` and the run log, and the
   scout keeps only the ones really about the feature. Add `--no-rovo` to `/coverage` to skip it.
 - **Cross-cutting features: `"crossCutting": true`** in modules.json. Pages have their own QA docs, and a
   page's doc may contain one export use case among ten others. With this flag, a story whose QA doc belongs to
   another page stays in scope when it mentions a keyword, and from any keyword- or Rovo-found UC doc only the
   use cases that mention a keyword become scenarios. The rest are listed as skipped, with the reason. Stories in
   `includeStories` keep their whole doc.
+
+### Every implementation of a feature: the feature map
+
+A cross-cutting feature has many separate implementations: grid export is one export per grid, about 60 of them.
+To find every missing case, each one has to be gone through, not just a sample. A module with a `surfaces` block in
+`modules.json` gets a **map** phase between the scout and the explorers:
+
+- **Code (0 tokens).** The feature's registry in the code (`surfaces.idSource`, e.g. the backend enum
+  `ExportTimedJobModul`) lists every surface. Its name, e.g. `ADMIN_UNIT_EXPORT(6)`, is the join key: the files that
+  name it are listed per layer (backend, legacy frontend, new frontend). A surface missing in a layer is flagged.
+- **UI sweep (0 tokens).** A Playwright script (not an agent) opens every page of the app's navigation, clicks the
+  feature's trigger (`surfaces.ui.trigger`; also inside an overflow menu or a dialog), records the request the page
+  sends (`surfaces.ui.requestPattern`: id, exported columns, filter) and **always aborts it**. The id joins the page
+  to its surface; the exported columns are compared with the grid's. Same safety as the UI explorer: the
+  environment's origin only, the saved session, every other write blocked. Try it alone:
+  `node scripts/ui-sweep.mjs --module "grid export" --max-pages 10`.
+- **Confluence (0 tokens).** Pages whose title matches the keywords and pages linked from the stories (profile
+  `confluence`), read through the same Atlassian token as Jira. Release notes count as change history only.
+- **Zephyr.** The module's whole pool (every case in `zephyrFolder` plus keyword-named cases, with steps), each case
+  assigned to the surface it names or to `shared`.
+
+The `feature-mapper` agent then checks the map: labels a tester sees, misassigned cases, why a surface is missing
+somewhere, look-alike features (`notThis`), behaviour every surface shares. The result is the `2_Feature_Map` sheet
+and `inspect.mjs --what map` / `--what surface --key <NAME>` for the later agents.
 
 ## Module catalogue: `profiles/<profile>/modules.json`
 
@@ -222,7 +249,7 @@ unchanged work uses 0 tokens. Review decisions already in the workbook are kept.
 
 ## Review and create
 
-1. In the workbook's `9_Gaps` sheet, set **Review decision** (`Approve` / `Reject` / `Review`). It is
+1. In the workbook's `10_Gaps` sheet, set **Review decision** (`Approve` / `Reject` / `Review`). It is
    pre-filled with the suggestion. You can edit the draft in place; steps use `n. action [data: x] => expected`,
    one per line.
 2. `node scripts/run.mjs --create-approved <workbook.xlsx>` is a dry run. It warns about approvals nobody
@@ -241,21 +268,22 @@ pipeline run, so the numbers never shift. The Summary starts with a linked index
 |---|---|
 | Summary | Sheet index, agent chain in pipeline order, coverage per module, **tokens by stage and by agent** (pipeline vs agents), tokens per story / scenario / gap, cache hit ratio |
 | 1_Module_Context* | Screens, workflows, rules, APIs, exact UI texts, test data, open questions and known issues, each with its sources (context-builder) |
-| 2_Story_Triage | Testable or not (rule / LLM / agent), module source, agent AC flags, reasoning |
-| 3_Link_Check | Zephyr cases already linked to each story or a related story |
-| 4_Expected_Scenarios | What should be tested (story / code / UI), evidence, agent review (kept / dropped / needs confirmation / suspected bug) |
-| 5_UI_Exploration* | UI inventory, checked scenarios, new scenarios, blocked requests, console errors; screenshots link to `ui/` |
-| 6_Zephyr_Cases | Existing cases compared, and why |
-| 7_Matching | Covered / Partial / Missing with confidence; `decidedBy` shows agent overrides |
-| 8_Test_Design* | The test suite the module should have, designed from the module context: why each case is needed (rule / workflow), Covered / Partial / Missing against the existing cases, and its gap id |
-| 9_Gaps | Drafts, validation result, suggested and review decision — **where you review** |
-| 10_Orphan_Zephyr | Linked cases that match no requirement |
-| 11_Agents* | One row per agent: status, tokens, findings, forwarded notes, review file, what a later stage applied |
-| 12_Agent_Reviews* | Every item of every review file with its reasoning; sections with their own sheet (module context, UI) get a pointer row |
-| 13_Run_Log | Every step, review merge, skip and error |
-| 14_Token_Usage | One row per Claude call and agent session: input, output, cache-read, cache-write and total tokens |
+| 2_Feature_Map | Cross-cutting modules: one row per surface (backend / legacy UI / new UI files, UI page and captured request, Zephyr cases, stories, Confluence, status and what is missing), then shared cases and behaviour, unmatched UI pages and items that are not this feature |
+| 3_Story_Triage | Testable or not (rule / LLM / agent), module source, agent AC flags, reasoning |
+| 4_Link_Check | Zephyr cases already linked to each story or a related story |
+| 5_Expected_Scenarios | What should be tested (story / code / UI), evidence, agent review (kept / dropped / needs confirmation / suspected bug) |
+| 6_UI_Exploration* | UI inventory, checked scenarios, new scenarios, blocked requests, console errors; screenshots link to `ui/` |
+| 7_Zephyr_Cases | Existing cases compared, and why |
+| 8_Matching | Covered / Partial / Missing with confidence; `decidedBy` shows agent overrides |
+| 9_Test_Design* | The test suite the module should have, designed from the module context: why each case is needed (rule / workflow), Covered / Partial / Missing against the existing cases, and its gap id |
+| 10_Gaps | Drafts, validation result, suggested and review decision — **where you review** |
+| 11_Orphan_Zephyr | Linked cases that match no requirement |
+| 12_Agents* | One row per agent: status, tokens, findings, forwarded notes, review file, what a later stage applied |
+| 13_Agent_Reviews* | Every item of every review file with its reasoning; sections with their own sheet (module context, UI) get a pointer row |
+| 14_Run_Log | Every step, review merge, skip and error |
+| 15_Token_Usage | One row per Claude call and agent session: input, output, cache-read, cache-write and total tokens |
 
-`create-approved` and re-runs still read workbooks built before this order (review sheet `8_Gaps` or `6_Gaps`).
+`create-approved` and re-runs still read workbooks built before this order (review sheet `9_Gaps`, `8_Gaps` or `6_Gaps`).
 
 ## JSON files
 
@@ -327,7 +355,7 @@ profile for project X". You can also ask about a finished run ("which gaps need 
 the run with `node scripts/inspect.mjs --run-dir <dir> --what <stories|scenarios|context|design|gaps|…>`
 instead of opening the whole workbook.
 
-**Create the approved cases.** Review `9_Gaps` in the workbook, then ask Claude to create the approved ones. It
+**Create the approved cases.** Review `10_Gaps` in the workbook, then ask Claude to create the approved ones. It
 runs the `--create-approved` dry run first and shows what would be created. It only adds `--yes` after you
 confirm that batch.
 
@@ -341,7 +369,7 @@ confirm that batch.
 |---|---|
 | `/coverage` command | [.claude/commands/coverage.md](.claude/commands/coverage.md) |
 | `coverage-gap-analysis` skill | [.claude/skills/coverage-gap-analysis/SKILL.md](.claude/skills/coverage-gap-analysis/SKILL.md) |
-| The nine agents (run headless by `agents.mjs`) | [.claude/agents/](.claude/agents/) |
+| The ten agents (run headless by `agents.mjs`) | [.claude/agents/](.claude/agents/) |
 | Project rules Claude follows | [CLAUDE.md](CLAUDE.md) |
 | Zephyr MCP server | [.mcp.json](.mcp.json), [zephyr_mcp/](zephyr_mcp/) |
 
@@ -364,6 +392,8 @@ Zephyr details plus `conventions.md`, and validate with `--dry-run`. No code cha
 | [config/config.yaml](config/config.yaml) | Pipeline, environments, scope filters, agent options, stage tuning |
 | [scripts/agents.mjs](scripts/agents.mjs), [scripts/lib/pipeline.mjs](scripts/lib/pipeline.mjs) | Agent pipeline orchestrator; agent registry, pipeline validation, UI safety |
 | [scripts/ui-login.mjs](scripts/ui-login.mjs), [scripts/lib/ui-session.mjs](scripts/lib/ui-session.mjs) | Saves and checks the logged-in browser session for the UI explorer; scripted re-login |
+| [scripts/ui-sweep.mjs](scripts/ui-sweep.mjs), [scripts/lib/ui-sweep.mjs](scripts/lib/ui-sweep.mjs) | UI sweep: every page of the navigation, the feature triggered, its request recorded and aborted |
+| [scripts/lib/surfaces.mjs](scripts/lib/surfaces.mjs), [scripts/lib/confluence.mjs](scripts/lib/confluence.mjs) | Feature map: surfaces from the code registry joined with UI, Confluence, stories and Zephyr; Confluence pages as requirements |
 | [scripts/run.mjs](scripts/run.mjs) | Pipeline (all stages or one) and `--create-approved` |
 | [scripts/lib/stages.mjs](scripts/lib/stages.mjs) | The eight stages |
 | [scripts/lib/reviews.mjs](scripts/lib/reviews.mjs) | Merging agent review files |

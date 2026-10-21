@@ -27,6 +27,7 @@ import { readJson, writeJson, slug } from "./lib/util.mjs";
 /** Script stages per phase, run by the orchestrator before the phase's agents. Explorer stages run only when their agent is configured. */
 const PHASE_STAGES = {
   scope: [], // the module-scout runs the scope stage itself: it chooses the module and keywords
+  map: [{ stage: "map" }], // 0 tokens: code registry, UI sweep, Confluence, Zephyr pool; skipped for modules without `surfaces`
   explore: [{ stage: "requirements" }, { stage: "code", agent: "code-analyst" }, { stage: "zephyr", agent: "zephyr-explorer" }],
   context: [{ stage: "context" }],
   design: [{ stage: "draft" }],
@@ -35,7 +36,7 @@ const PHASE_STAGES = {
 };
 
 /** Explorers whose failure does not stop the run (when agents.continueWhenExplorerFails is true). */
-const OPTIONAL_EXPLORERS = ["code-analyst", "ui-explorer", "zephyr-explorer"];
+const OPTIONAL_EXPLORERS = ["feature-mapper", "code-analyst", "ui-explorer", "zephyr-explorer"];
 
 const ZEPHYR_READ = ["get_test_case", "get_test_steps", "get_issue_test_cases", "search_test_cases", "list_folders"].map((t) => `mcp__zephyr__${t}`);
 
@@ -47,6 +48,7 @@ export function allowedTools(agent, rel, { uiMode = "read-only" } = {}) {
   const stage = agent.stage === "scope" ? ["Bash(node scripts/run.mjs --stage scope *)"] : [];
   const extra = {
     "module-scout": ["Bash(node scripts/modules.mjs *)", "Bash(node scripts/code-map.mjs *)", "mcp__zephyr__list_folders"],
+    "feature-mapper": ["Bash(node scripts/code-map.mjs *)", ...ZEPHYR_READ],
     "code-analyst": ["Bash(node scripts/code-map.mjs *)"],
     "ui-explorer": uiTools(uiMode),
     "zephyr-explorer": ZEPHYR_READ,
@@ -96,7 +98,7 @@ export function buildPrompt({ agent, rel, profile, moduleWords, keywords, limit,
   } else if (agent.stage !== "report") {
     L.push(`  (The ${agent.stage} stage has ALREADY been run for you — do not run it; review its results.)`);
   }
-  L.push(`  node scripts/inspect.mjs --run-dir ${rel} --what <stories|story|scenarios|code|ui|inventory|context|candidates|matches|design|gaps|validation|handoffs> [--key KEY] [--filter text]`);
+  L.push(`  node scripts/inspect.mjs --run-dir ${rel} --what <map|surface|stories|story|scenarios|code|ui|inventory|context|candidates|matches|design|gaps|validation|handoffs> [--key KEY] [--filter text]`);
   L.push("");
   if (previous.length) {
     L.push("Findings forwarded by the earlier agents:");
@@ -244,6 +246,8 @@ Pipeline (config/config.yaml): ${phases.map((p) => p.agents.map((x) => x.name).j
     for (const x of rerun.filter((y) => y.review)) fs.rmSync(path.join(runDir, "review", `${x.review}.json`), { force: true });
   }
   if (rerun.some((x) => x.name === "ui-explorer")) fs.rmSync(path.join(runDir, "ui"), { recursive: true, force: true });
+  // A run that includes the map phase sweeps the UI afresh (a copied run folder holds the earlier sweep).
+  if (fromPhase <= PHASES.indexOf("map") && untilPhase >= PHASES.indexOf("map")) fs.rmSync(path.join(runDir, "ui-sweep"), { recursive: true, force: true });
   writeJson(path.join(runDir, "version.json"), {
     run: path.basename(runDir), startedAt: new Date().toISOString(), resumedFrom: resumedFrom ? path.basename(resumedFrom) : null,
     module: a.module, from: a.from ?? null, until: a.until ?? null, skip: [...skip], env: a.env ?? cfg.environment ?? null,
@@ -271,18 +275,22 @@ Pipeline (config/config.yaml): ${phases.map((p) => p.agents.map((x) => x.name).j
   if (mcp.ui) log(`UI: ${mcp.ui.envName} ${mcp.ui.baseUrl} (mode ${mcp.ui.mode})`);
 
   const order = new Map(configuredAgents.map((x, i) => [x.name, i + 1]));
-  const handoffPath = (name) => path.join(runDir, "handoff", `${String(order.get(name)).padStart(2, "0")}-${name}.json`);
-  const handoffsBefore = (phaseIdx) => configuredAgents.filter((x) => phaseOf(x.name) < phaseIdx).map((x) => readJson(handoffPath(x.name), null)).filter(Boolean);
+  // handoff/<agent>.json; runs made before the map phase existed named them NN-<agent>.json (NN = pipeline position).
+  const handoffPath = (name) => path.join(runDir, "handoff", `${name}.json`);
+  const numbered = (name) => fs.readdirSync(path.join(runDir, "handoff")).filter((f) => f.endsWith(`-${name}.json`) && /^\d+-/.test(f)).map((f) => path.join(runDir, "handoff", f));
+  const readHandoff = (name) => readJson(handoffPath(name), null) ?? (numbered(name)[0] ? readJson(numbered(name)[0]) : null);
+  const handoffsBefore = (phaseIdx) => configuredAgents.filter((x) => phaseOf(x.name) < phaseIdx).map((x) => readHandoff(x.name)).filter(Boolean);
   const stateExists = () => fs.existsSync(path.join(runDir, "state.json"));
   const tokenLog = () => new TokenLog(path.join(runDir, "token_log.jsonl"));
 
   const runStage = async (stage) => {
-    const ctx = RunContext.load(runDir, {});
+    const ctx = RunContext.load(runDir, { env: a.env });
     await STAGE_FUNCS[stage](ctx);
     ctx.save();
   };
 
   const finishHandoff = (agent, handoff) => {
+    for (const old of numbered(agent.name)) fs.rmSync(old, { force: true });
     writeJson(handoffPath(agent.name), handoff);
     log(`${agent.name}: ${handoff.status} · ${(handoff.tokens ?? 0).toLocaleString("en-US")} tokens · ${Math.round((handoff.durationMs ?? 0) / 1000)}s`);
     for (const f of handoff.findings ?? []) log(`   - ${f}`);
@@ -292,7 +300,7 @@ Pipeline (config/config.yaml): ${phases.map((p) => p.agents.map((x) => x.name).j
   const runAgent = async (agent, phaseIdx, { redesign = null } = {}) => {
     const base = { order: order.get(agent.name), agent: agent.name };
     if (skip.has(agent.name)) {
-      const earlier = readJson(handoffPath(agent.name), null);
+      const earlier = readHandoff(agent.name);
       if (earlier && earlier.status && !String(earlier.findings?.[0] ?? "").startsWith("Skipped by --skip")) {
         log(`${agent.name}: skipped, keeping its result from ${earlier.reusedFrom ?? (resumedFrom ? path.basename(resumedFrom) : "the earlier run")}`);
         const kept = { ...earlier, reusedFrom: earlier.reusedFrom ?? (resumedFrom ? path.basename(resumedFrom) : "earlier run") };

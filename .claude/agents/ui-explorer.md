@@ -26,7 +26,7 @@ Your prompt gives the environment URL, the UI mode (which tools you have) and a 
      not the failed request.
    - Never try to get around the mode: no other URLs than the given origin, no file uploads, no scripts.
 4. **Write your review file** (`schema/review/ui.schema.json`). Always write it, even when nothing is new:
-   it is the evidence of your exploration in the workbook (5_UI_Exploration) and coverage.json.
+   it is the evidence of your exploration in the workbook (6_UI_Exploration) and coverage.json.
    - `inventory`: every in-scope thing you saw, one item per functionality (a menu entry, a button, a dialog,
      a column set, a message, a disabled state). Give the action you took and the result you saw, the element
      (role, accessible name, visible text), a confidence (HIGH directly observed, MEDIUM seen but the workflow

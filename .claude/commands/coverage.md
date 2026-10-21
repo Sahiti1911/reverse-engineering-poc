@@ -38,8 +38,9 @@ Skip steps 0–1 when resuming with `--from`.
    `--module` only when the arguments named no module), plus `--extra-stories runs/<profile>/rovo/<slug>.json`
    when step 0 found stories, and any `--keywords`, `--limit`, `--from` or `--skip` options from the arguments.
    Use a 60-minute timeout.
-   The pipeline (config/config.yaml) is: module-scout → requirements-analyst + code-analyst + ui-explorer +
-   zephyr-explorer (in parallel) → context-builder → test-designer → coverage-validator → reporter. Pass `--env` when
+   The pipeline (config/config.yaml) is: module-scout → feature-mapper (cross-cutting modules: every implementation
+   of the feature, from the code registry, a UI sweep of every page, Confluence and the whole Zephyr pool) →
+   requirements-analyst + code-analyst + ui-explorer + zephyr-explorer (in parallel) → context-builder → test-designer → coverage-validator → reporter. Pass `--env` when
    the arguments name an environment. If the run says the UI explorer could not start (no saved login), tell the
    user to run `npm run ui-login` and that the rest of the run went on without the UI.
    It derives expected scenarios from the stories (UC docs, acceptance criteria) and from the frontend and
@@ -50,6 +51,6 @@ Skip steps 0–1 when resuming with `--from`.
    suspected bugs and the "Tokens used" table. Say how many Rovo candidates there were and how many the
    scout kept (from its findings), and list the Rovo Confluence docs (title + link) as further reading.
    Give the workbook path.
-5. Do not create anything in Zephyr and do not change Jira. Point the user to the 8_Test_Design sheet (the
-   designed suite and what existing cases cover), the 9_Gaps review and the
+5. Do not create anything in Zephyr and do not change Jira. Point the user to the 9_Test_Design sheet (the
+   designed suite and what existing cases cover), the 10_Gaps review and the
    `--create-approved` dry run.

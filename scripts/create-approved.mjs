@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Creates (or extends) Zephyr test cases for the 9_Gaps rows (8_Gaps or 6_Gaps in older workbooks) a reviewer marked "Approve".
+// Creates (or extends) Zephyr test cases for the 10_Gaps rows (9_Gaps, 8_Gaps or 6_Gaps in older workbooks) a reviewer marked "Approve".
 // Dry run by default: prints what would happen. --yes performs it. Zephyr has NO delete endpoint.
 //   node scripts/create-approved.mjs <workbook.xlsx> [--profile avl] [--yes]
 import path from "node:path";

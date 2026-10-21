@@ -9,6 +9,7 @@ import { readJson } from "./util.mjs";
 
 export const REVIEW_AGENTS = {
   scout: "module-scout",
+  map: "feature-mapper",
   requirements: "requirements-analyst",
   code: "code-analyst",
   ui: "ui-explorer",
@@ -61,6 +62,70 @@ export function applyScoutReview(ctx) {
     applied++;
   }
   finish(ctx, "scout", applied, missing);
+  return applied;
+}
+
+/** feature-mapper: correct the feature map (labels, aliases, case and story assignment, added or dropped surfaces, shared behaviour). */
+export function applyMapReview(ctx) {
+  const review = loadReview(ctx, "map");
+  const map = ctx.state.featureMap;
+  if (!review || !map) return 0;
+  let applied = 0;
+  const missing = [];
+  const find = (name) => map.surfaces.find((s) => s.name === name);
+  const unassign = (key) => {
+    map.shared.cases = map.shared.cases.filter((k) => k !== key);
+    for (const s of map.surfaces) s.cases = s.cases.filter((k) => k !== key);
+  };
+  const dropSurface = (name, reasoning) => {
+    const s = find(name);
+    if (!s) return false;
+    map.surfaces = map.surfaces.filter((x) => x !== s);
+    map.shared.cases.push(...s.cases.filter((k) => !map.shared.cases.includes(k)));
+    if (!map.notThis.surfaces.some((x) => x.name === name)) map.notThis.surfaces.push({ name, by: by("map"), reasoning });
+    return true;
+  };
+  for (const ch of review.surfaces ?? []) {
+    if (ch.drop) { if (dropSurface(ch.name, ch.reasoning)) applied++; else missing.push(ch.name); continue; }
+    const s = find(ch.name);
+    if (!s) { missing.push(ch.name); continue; }
+    if (ch.label) s.label = ch.label;
+    s.aliases = [...new Set([...(s.aliases ?? []), ...(ch.aliases ?? [])])];
+    for (const k of ch.removeCases ?? []) { s.cases = s.cases.filter((x) => x !== k); if (!map.shared.cases.includes(k)) map.shared.cases.push(k); }
+    for (const k of ch.addCases ?? []) { unassign(k); s.cases.push(k); }
+    s.stories = [...new Set([...s.stories, ...(ch.addStories ?? [])])];
+    if (ch.note) s.note = ch.note;
+    s.reviewedBy = by("map");
+    s.reasoning = appendReason(s.reasoning, "map", ch.reasoning);
+    applied++;
+  }
+  for (const a of review.addSurfaces ?? []) {
+    if (!find(a.name)) {
+      map.surfaces.push({
+        name: a.name, id: null, label: a.label, code: { backend: [], legacy: [], frontend: [] }, ui: [], confluence: [], stories: [], cases: [],
+        evidence: a.evidence, addedBy: by("map"), reasoning: `Added by agent ${REVIEW_AGENTS.map}: ${a.reasoning} Evidence: ${a.evidence.join(", ")}.`,
+      });
+    }
+    applied++;
+  }
+  for (const n of review.notThis ?? []) {
+    if (n.kind === "surface") { if (dropSurface(n.id, n.reasoning)) applied++; else missing.push(n.id); continue; }
+    const bucket = n.kind === "case" ? "cases" : "confluence";
+    const key = n.kind === "case" ? "key" : "id";
+    for (const s of map.surfaces) s[bucket] = s[bucket].filter((x) => x !== n.id);
+    map.shared[bucket] = map.shared[bucket].filter((x) => x !== n.id);
+    if (!map.notThis[bucket].some((x) => x[key] === n.id)) map.notThis[bucket].push({ [key]: n.id, by: by("map"), reasoning: n.reasoning });
+    applied++;
+  }
+  if (review.sharedBehaviours) {
+    map.sharedBehaviours = review.sharedBehaviours.map((b, i) => ({ id: `SB-${String(i + 1).padStart(2, "0")}`, ...b, by: by("map") }));
+    applied += review.sharedBehaviours.length;
+  }
+  for (const s of map.surfaces) {
+    s.missing = [...(s.missing ?? []).filter((m) => m !== "zephyr"), ...(!s.cases.length ? ["zephyr"] : [])];
+    s.status = s.addedBy ? "added by agent" : s.missing.length ? `missing: ${s.missing.join(", ")}` : "complete";
+  }
+  finish(ctx, "map", applied, missing);
   return applied;
 }
 

@@ -1,5 +1,5 @@
 // The pipeline stages. Each one: merge the review files of the agents before it (if any), reset only its own
-// outputs, do its work, save state. Order: scope → requirements → code → zephyr → context → draft → validate → report.
+// outputs, do its work, save state. Order: scope → map → requirements → code → zephyr → context → draft → validate → report.
 // requirements, code and zephyr feed the explorer agents, which run side by side; context merges all of them.
 import fs from "node:fs";
 import path from "node:path";
@@ -9,15 +9,19 @@ import { resolveScope } from "./scope.mjs";
 import { triageByRules, deriveModule, keywordRegex } from "./triage-rules.mjs";
 import { parseUcDoc, ucDocToScenarios, useCasesMentioning, focusRegex, splitByFocus } from "./uc-parser.mjs";
 import { getSteps, caseUrl } from "./zephyr.mjs";
-import { ensureRepo, collectModuleCode, codeUrl } from "./code.mjs";
+import { ensureRepo, collectModuleCode, codeUrl, codeFiles } from "./code.mjs";
+import { parseIdSource, findSurfaceFiles, followDispatch, joinSurfaces } from "./surfaces.mjs";
+import { gatherConfluence } from "./confluence.mjs";
+import { runSweep, compareColumns } from "./ui-sweep.mjs";
+import { ensureSession } from "./ui-session.mjs";
 import { selectCandidates, folderCandidates } from "./candidates.mjs";
 import { buildWorkbook, readGapSheet } from "./workbook.mjs";
 import { collectAgentResults } from "./agent-results.mjs";
 import { writeModuleContext } from "./module-context.mjs";
 import { runHeader, runFiles, coverageJson, agentsJson } from "./run-outputs.mjs";
-import { resolvePipeline } from "./pipeline.mjs";
+import { resolvePipeline, resolveEnvironment } from "./pipeline.mjs";
 import { writeSummary } from "./report.mjs";
-import { applyScoutReview, applyRequirementsReview, applyCodeReview, applyUiReview, applyZephyrReview, applyContextReview, applyDraftsReview, applyValidationReview, primaryStory } from "./reviews.mjs";
+import { applyScoutReview, applyRequirementsReview, applyCodeReview, applyUiReview, applyZephyrReview, applyContextReview, applyDraftsReview, applyValidationReview, applyMapReview, primaryStory } from "./reviews.mjs";
 import { validateGap } from "./validate.mjs";
 import { needsDraft, designInput, normalizeSuite, checkCandidates, inheritedCheck, untracedScenarioGaps, designGap } from "./test-design.mjs";
 import { chunk, promisePool, truncate, hash, writeJson, readJson } from "./util.mjs";
@@ -154,10 +158,122 @@ function rememberKeywords(ctx, scope) {
   ctx.step("remember", { notes: `Saved keywords for "${name}" (${scope.moduleFilter}) into profiles/${ctx.profile.name}/modules.json.` });
 }
 
+// ---------------------------------------------------------------- 1b. map
+/**
+ * Feature map of a cross-cutting module (modules.json `surfaces`), 0 tokens: every surface from the code's
+ * registry, its files in each code layer, the request each page of the UI sends (UI sweep), Confluence pages,
+ * stories and the module's whole Zephyr pool, joined per surface. Modules without `surfaces` skip it.
+ */
+export async function mapStage(ctx) {
+  const { profile, cfg, state } = ctx;
+  applyScoutReview(ctx);
+  const scope = state.scope;
+  const mod = scope?.moduleFilter ? profile.modules?.[scope.moduleFilter] : null;
+  const conf = mod?.surfaces;
+  if (!conf) {
+    state.featureMap = null;
+    ctx.step("map", { skipped: `module ${scope?.moduleFilter ?? scope?.value ?? ""} has no surfaces block in modules.json: the module is one surface` });
+    ctx.markDone("map");
+    return;
+  }
+  // 1. Registry and code layers.
+  const repo = profile.code.repos.find((r) => r.name === conf.idSource.repo) ?? profile.code.repos[0];
+  const repoInfo = ensureRepo(repo, ctx.cacheDir, { refresh: false, log: (m) => ctx.log(m) });
+  const registryFile = path.join(repoInfo.dir, conf.idSource.file);
+  if (!fs.existsSync(registryFile)) throw new Error(`modules.json surfaces.idSource.file not found in ${repo.name}: ${conf.idSource.file}`);
+  const registry = parseIdSource(fs.readFileSync(registryFile, "utf8"), conf.idSource.pattern);
+  const all = codeFiles(repo, repoInfo);
+  const byBase = new Map();
+  for (const f of all) {
+    const b = f.path.split("/").pop().replace(/\.[^.]+$/, "");
+    byBase.set(b, [...(byBase.get(b) ?? []), f.path]);
+  }
+  // Files naming each surface, plus the classes a dispatcher's `case NAME:` branch calls (the real handler).
+  const files = followDispatch(findSurfaceFiles(all, registry.map((r) => r.name), { exclude: [conf.idSource.file] }), all, byBase);
+  ctx.step("map-code", { out: registry.length, notes: `${registry.length} surface(s) in ${conf.idSource.file.split("/").pop()}; ${[...files.values()].reduce((n, f) => n + f.length, 0)} file reference(s) across backend, legacy and new frontend.` });
+
+  // 2. The module's whole Zephyr pool: every case in its folder plus cases named with a keyword, with steps.
+  const zephyr = await ctx.zephyr();
+  const folder = String(mod.zephyrFolder ?? "").toLowerCase();
+  const kwRx = scope.keywords?.length ? keywordRegex(scope.keywords) : null;
+  const pool = zephyr.inScopeCases.filter((c) => (folder && c.folderPath.toLowerCase().includes(folder)) || (kwRx && kwRx.test(c.name)));
+  const steps = await promisePool(pool, ctx.concurrency, (c) => getSteps({ profile, cacheDir: ctx.cacheDir, key: c.key, maxAgeHours: cfg.zephyr.stepsMaxAgeHours }).catch(() => []));
+  const poolCases = pool.map((c, i) => ({
+    key: c.key, name: c.name, folderPath: c.folderPath, objective: c.objective,
+    steps: steps[i].map((s) => [s.description, s.expectedResult].filter(Boolean).join(" => ")),
+  }));
+  writeJson(path.join(ctx.runDir, "map", "zephyr-pool.json"), poolCases);
+  ctx.step("map-zephyr", { out: pool.length, notes: `${pool.length} case(s) in the module pool (folder "${mod.zephyrFolder ?? "-"}" plus keyword-named cases).` });
+
+  // 3. Confluence: title search on the keywords and pages linked from the stories.
+  const live = ctx.stories.filter((r) => !r.dropped);
+  let confluence = { pages: [], notes: ["no confluence block in profile.json"] };
+  if (profile.confluence && profile.confluence.enabled !== false && !ctx.dryRun) {
+    confluence = await gatherConfluence({ jira: ctx.jira, conf: profile.confluence, keywords: scope.keywords ?? [], stories: live.map((r) => r.story), cacheDir: ctx.cacheDir, log: (m) => ctx.log(m) });
+  }
+  writeJson(path.join(ctx.runDir, "map", "confluence.json"), confluence);
+  const failed = confluence.notes.filter((n) => /failed|not read/.test(n));
+  ctx.step("map-confluence", {
+    out: confluence.pages.length,
+    notes: `${confluence.pages.length} page(s): ${confluence.pages.map((p) => p.title).join(", ").slice(0, 400)}. ${confluence.notes.filter((n) => !failed.includes(n)).join(" ")}`.slice(0, 600),
+    errors: failed.join(" ").slice(0, 400),
+  });
+
+  // 4. UI sweep (Playwright script, 0 tokens). A sweep of the last 24 h in this run folder is reused.
+  let sweep = null;
+  const uiOpts = cfg.agents?.["ui-explorer"] ?? {};
+  const sweepFile = path.join(ctx.runDir, "ui-sweep", "sweep.json");
+  if (conf.ui && uiOpts.sweep?.enabled !== false && !ctx.dryRun) {
+    const earlier = fs.existsSync(sweepFile) && Date.now() - fs.statSync(sweepFile).mtimeMs < 86_400_000 && !ctx.opts.force ? readJson(sweepFile) : null;
+    if (earlier?.navLinks > 0) {
+      sweep = earlier;
+      ctx.step("map-ui", { notes: `Reused the UI sweep of ${sweep.sweptAt}.` });
+    } else {
+      try {
+        const env = resolveEnvironment(cfg, ctx.opts.env);
+        const session = await ensureSession(env, { log: (m) => ctx.log(m) });
+        if (!session.ok) throw new Error(`saved login for '${env.name}' is not valid (${session.problem}); run npm run ui-login -- --env ${env.name}`);
+        sweep = await runSweep({ env, ui: conf.ui, opts: uiOpts, outDir: path.join(ctx.runDir, "ui-sweep"), extraRoutes: (mod.uiRoutes ?? []).map((r) => (r.startsWith("#") ? r : `#${r}`)), log: (m) => ctx.log(m) });
+      } catch (err) {
+        ctx.step("map-ui", { errors: `UI sweep failed: ${err.message.slice(0, 300)}` });
+      }
+    }
+    if (sweep) ctx.step("map-ui", { in: sweep.pages.length, out: sweep.pages.filter((p) => p.requests.length).length, notes: `${sweep.pages.length} page(s) swept, ${sweep.pages.filter((p) => p.trigger).length} with the trigger, ${sweep.pages.filter((p) => p.requests.length).length} sent the feature request.` });
+  }
+
+  // Column checks are recomputed from what was recorded, so a reused sweep follows the current rule.
+  for (const p of sweep?.pages ?? []) {
+    const cols = [...new Set(p.requests.flatMap((q) => q.columns))];
+    if (!cols.length) continue;
+    const d = compareColumns(p.gridColumns ?? [], cols);
+    p.columnsMatch = d.match;
+    p.columnDiff = d.match === false ? { onlyInGrid: d.onlyInGrid, onlyInExport: d.onlyInExport } : null;
+  }
+
+  // 5. Join per surface.
+  const map = joinSurfaces({
+    registry, files, repo, ui: sweep?.pages ?? null, labelDrop: conf.labelDrop ?? [], notThis: conf.notThis ?? [],
+    confluence: confluence.pages.filter((p) => p.kind === "requirement"),
+    stories: live.map((r) => ({ key: r.story.key, summary: r.story.summary, text: r.story.descriptionText, featurePath: r.story.hostModule ?? r.story.featurePath })),
+    cases: poolCases.map((c) => ({ ...c, objective: `${c.objective ?? ""} ${c.steps.join(" ")}` })),
+  });
+  state.featureMap = {
+    module: scope.moduleFilter, registry: conf.idSource.file, builtAt: new Date().toISOString(), swept: !!sweep,
+    ...map, confluence: confluence.pages.map(({ text, ...p }) => p), sharedBehaviours: [],
+  };
+  const complete = map.surfaces.filter((s) => s.status === "complete").length;
+  ctx.step("map", {
+    out: map.surfaces.length,
+    notes: `${map.surfaces.length} surface(s), ${complete} complete; ${map.shared.cases.length} pool case(s) not about one surface (shared); ${map.notThis.surfaces.length + map.notThis.cases.length + map.notThis.confluence.length} item(s) not this feature; ${map.unmatchedUi.length} UI page(s) unmatched.`,
+  });
+  ctx.markDone("map");
+}
+
 // ---------------------------------------------------------------- 2. requirements
 export async function requirementsStage(ctx) {
   const { profile, cfg } = ctx;
   applyScoutReview(ctx);
+  applyMapReview(ctx);
   ctx.clearErrors("requirements");
   for (const r of ctx.stories) {
     Object.assign(r, { expected: [], droppedScenarios: [], skippedUcs: [], flags: [], extractNote: undefined });
@@ -653,7 +769,9 @@ export async function validateStage(ctx) {
 export async function reportStage(ctx, { out } = {}) {
   const { profile, cfg, state } = ctx;
   const zephyr = await ctx.zephyr();
-  // Both are idempotent: drafts may not have been merged when the validate phase is switched off.
+  // All idempotent: the feature map review is not merged yet when a run stops after the map phase (--until
+  // feature-mapper); drafts may not have been merged when the validate phase is switched off.
+  applyMapReview(ctx);
   applyDraftsReview(ctx, new Map(zephyr.folders.map((f) => [f.id, f.path])));
   applyValidationReview(ctx);
   const scope = state.scope;
@@ -703,7 +821,7 @@ export async function reportStage(ctx, { out } = {}) {
   const moduleContext = state.moduleContext ?? null;
   if (moduleContext) writeModuleContext(ctx.runDir, moduleContext, { title: `Module context — ${scope.moduleFilter ?? scope.value ?? ""}` });
   const run = runHeader({ runDir: ctx.runDir, state, profile });
-  const files = runFiles({ runDir: ctx.runDir, workbookPath, agentRun: !!agentResults, hasContext: !!moduleContext, hasUi: !!agentResults?.ui });
+  const files = runFiles({ runDir: ctx.runDir, workbookPath, agentRun: !!agentResults, hasContext: !!moduleContext, hasUi: !!agentResults?.ui, hasMap: !!state.featureMap, hasSweep: !!state.featureMap?.swept });
   if (agentResults) writeJson(path.join(ctx.runDir, "agents.json"), agentsJson({ run, files, agents: agentResults.agents }));
   const runInfo = {
     runAt: state.runAt, zephyrExportedAt: state.zephyrExportedAt ?? zephyr.exportedAt, codeCommits: state.codeCommits.join(", "),
@@ -714,18 +832,18 @@ export async function reportStage(ctx, { out } = {}) {
   ctx.save();
   let built;
   try {
-    built = await buildWorkbook({ file: workbookPath, profile, scope, stories: ordered, zephyr, tokenRecords: ctx.tokenLog.records, runLog: state.runLog, runInfo, urls, handoffs, agentResults, moduleContext, testDesign: state.testDesign ?? null });
+    built = await buildWorkbook({ file: workbookPath, profile, scope, stories: ordered, zephyr, tokenRecords: ctx.tokenLog.records, runLog: state.runLog, runInfo, urls, handoffs, agentResults, moduleContext, testDesign: state.testDesign ?? null, featureMap: state.featureMap ?? null });
   } catch (err) {
     if (err.code === "EBUSY") throw new Error(`${workbookPath} is open in another program (Excel?). Close it and re-run the report stage; nothing else needs repeating.`);
     throw err;
   }
   const summary = writeSummary({ ctx, built, workbookPath, handoffs, run, files });
   const jsonPath = path.join(ctx.runDir, files.coverage);
-  writeJson(jsonPath, coverageJson({ run, files, counts: built.counts, moduleContext, testDesign: state.testDesign ?? null, ui: agentResults?.ui ?? null, stories: ordered }));
+  writeJson(jsonPath, coverageJson({ run, files, counts: built.counts, moduleContext, featureMap: state.featureMap ?? null, testDesign: state.testDesign ?? null, ui: agentResults?.ui ?? null, stories: ordered }));
   // The baseline moves only when a real run finished without hitting the token budget.
   if (!ctx.dryRun && !state.budgetHit && scope.baselineKey) writeJson(baselineFile(profile.name), { ...readBaseline(profile.name), [scope.baselineKey]: state.runAt });
   return { built, workbookPath, summaryPath: summary.file, jsonPath };
 }
 
-export const STAGE_FUNCS = { scope: scopeStage, requirements: requirementsStage, code: codeStage, zephyr: zephyrStage, context: contextStage, draft: draftStage, validate: validateStage, report: reportStage };
+export const STAGE_FUNCS = { scope: scopeStage, map: mapStage, requirements: requirementsStage, code: codeStage, zephyr: zephyrStage, context: contextStage, draft: draftStage, validate: validateStage, report: reportStage };
 export { ROOT };

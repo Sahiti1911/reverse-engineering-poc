@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // Compact, token-friendly views of a run's state for the agents (and for people).
-//   node scripts/inspect.mjs --run-dir <dir> --what stories|story|scenarios|code|ui|inventory|context|candidates|matches|design|gaps|validation|handoffs [--key AVLN-1] [--filter text]
+//   node scripts/inspect.mjs --run-dir <dir> --what map|surface|stories|story|scenarios|code|ui|inventory|context|candidates|matches|design|gaps|validation|handoffs [--key AVLN-1] [--filter text]
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { readJson } from "./lib/util.mjs";
 
 const { values: a } = parseArgs({ options: { "run-dir": { type: "string" }, what: { type: "string" }, key: { type: "string" }, filter: { type: "string" }, max: { type: "string" } } });
 if (!a["run-dir"] || !a.what) {
-  console.error("Usage: node scripts/inspect.mjs --run-dir <dir> --what stories|story|scenarios|code|ui|inventory|context|candidates|matches|design|gaps|validation|handoffs [--key KEY] [--filter text] [--max n]");
+  console.error("Usage: node scripts/inspect.mjs --run-dir <dir> --what map|surface|stories|story|scenarios|code|ui|inventory|context|candidates|matches|design|gaps|validation|handoffs [--key KEY] [--filter text] [--max n]");
   process.exit(2);
 }
 const runDir = path.resolve(a["run-dir"]);
@@ -100,6 +100,52 @@ switch (a.what) {
       keep(`${i.id} | ${i.screen} | ${cut(i.functionality, 90)} | ${i.action} => ${cut(i.result, 120)} | ${i.confidence}${i.element ? ` | element: ${cut(i.element, 80)}` : ""}${i.uncertainty ? ` | uncertain: ${cut(i.uncertainty, 100)}` : ""}`);
     }
     if (!ui?.inventory?.length) out.push("No UI inventory in this run (the UI explorer wrote none, or did not run).");
+    break;
+  }
+  case "map": {
+    // The feature map of a cross-cutting module: one line per surface (implementation), then what is shared or not this feature.
+    const m = state.featureMap;
+    if (!m) { out.push("No feature map: the module has no surfaces block in modules.json, or the map stage has not run."); break; }
+    const totalCases = m.surfaces.reduce((n, s) => n + s.cases.length, 0) + m.shared.cases.length;
+    out.push(`TOTAL surfaces ${m.surfaces.length} (complete ${m.surfaces.filter((s) => s.status === "complete").length}); pool cases ${totalCases} (on a surface ${totalCases - m.shared.cases.length}, shared ${m.shared.cases.length}); not this feature: ${m.notThis.surfaces.length} surface(s), ${m.notThis.cases.length} case(s), ${m.notThis.confluence.length} page(s); UI ${m.swept ? `swept, ${m.unmatchedUi.length} page(s) unmatched` : "not swept"}`);
+    out.push("name | id | label | backend/legacy/new files | UI pages | cases | stories | confluence | status");
+    for (const s of m.surfaces) keep(`${s.name} | ${s.id ?? "-"} | ${s.label} | ${s.code.backend.length}/${s.code.legacy.length}/${s.code.frontend.length} | ${s.ui.map((u) => u.title || u.route).join(", ") || "-"} | ${s.cases.length} | ${s.stories.join(",") || "-"} | ${s.confluence.length} | ${s.status}${s.note ? ` | note: ${cut(s.note, 80)}` : ""}`);
+    out.push(`--- Confluence pages: ${m.confluence.map((p) => `${p.id} "${p.title}" (${p.kind}, ${p.foundBy.join("; ")})`).join(" · ") || "none"}`);
+    out.push(`--- Shared Confluence pages (no single surface): ${m.shared.confluence.join(", ") || "none"}`);
+    for (const u of m.unmatchedUi) keep(`UI unmatched: ${u.route} "${u.title}" — ${u.reasoning}`);
+    for (const n of m.notThis.surfaces) keep(`NOT THIS surface ${n.name}: ${n.reasoning}`);
+    for (const n of m.notThis.confluence) keep(`NOT THIS page ${n.id} "${n.title ?? ""}": ${n.reasoning}`);
+    for (const b of m.sharedBehaviours ?? []) keep(`SHARED ${b.id} ${b.title}: ${cut(b.detail, 160)}`);
+    out.push("Details: --what surface --key <NAME> (or --key shared for the cases about no single surface)");
+    break;
+  }
+  case "surface": {
+    const { existsSync } = await import("node:fs");
+    const m = state.featureMap;
+    if (!m || !a.key) { out.push("Usage: --what surface --key <surface name | shared>"); break; }
+    const poolFile = path.join(runDir, "map", "zephyr-pool.json");
+    const pool = new Map((existsSync(poolFile) ? readJson(poolFile) : []).map((c) => [c.key, c]));
+    const caseLine = (k) => `  ${k} ${cut(pool.get(k)?.name, 100)}${pool.get(k)?.steps?.length ? ` (${pool.get(k).steps.length} steps)` : ""}`;
+    if (a.key === "shared") {
+      out.push(`Cases about no single surface (${m.shared.cases.length}):`);
+      for (const k of m.shared.cases) keep(caseLine(k));
+      break;
+    }
+    const s = m.surfaces.find((x) => x.name === a.key);
+    if (!s) { out.push(`No surface ${a.key}. See --what map.`); break; }
+    out.push(`${s.name} (id ${s.id ?? "-"}) "${s.label}" — ${s.status}${s.aliases?.length ? ` · aliases: ${s.aliases.join(", ")}` : ""}`);
+    out.push(`reasoning: ${s.reasoning}`);
+    if (s.note) out.push(`note: ${s.note}`);
+    for (const layer of ["backend", "legacy", "frontend"]) out.push(`${layer}: ${s.code[layer].join(", ") || "none"}`);
+    const sweepFile = path.join(runDir, "ui-sweep", "sweep.json");
+    const pages = existsSync(sweepFile) ? readJson(sweepFile).pages : [];
+    for (const u of s.ui) {
+      const p = pages.find((x) => x.route === u.route && x.title === u.title) ?? pages.find((x) => x.route === u.route);
+      out.push(`UI ${u.route} "${u.title}": grid columns ${p?.gridColumns?.length ?? "?"}; exported ${p?.requests?.flatMap((q) => q.columns).length ?? "?"} column(s)${p?.columnDiff ? `; grid only: ${p.columnDiff.onlyInGrid.join(", ")}; export only: ${p.columnDiff.onlyInExport.join(", ")}` : ""}${p?.dialog ? `; dialog "${p.dialog.title}" fields ${p.dialog.fields.join(", ")}` : ""}${p?.options?.length ? `; options ${p.options.join(", ")}` : ""}${p?.screenshot ? `; screenshot ${p.screenshot}` : ""}`);
+    }
+    out.push(`stories: ${s.stories.join(", ") || "none"} · confluence: ${s.confluence.map((id) => `${id} "${m.confluence.find((p) => p.id === id)?.title ?? ""}"`).join(", ") || "none"}`);
+    out.push(`cases (${s.cases.length}):`);
+    for (const k of s.cases) keep(caseLine(k));
     break;
   }
   case "context": {

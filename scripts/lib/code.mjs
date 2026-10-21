@@ -33,8 +33,9 @@ export function ensureRepo(repo, cacheDir, { refresh = true, log = () => {} } = 
     git(dir, ["reset", "--hard", "FETCH_HEAD"]);
   } else {
     // A profile that gained roots must widen the checkout even when not refreshing.
-    const current = new Set(git(dir, ["sparse-checkout", "list"]).split("\n").map((s) => s.trim()).filter(Boolean));
-    if (roots.some((r) => !current.has(r))) {
+    // Cone mode lists only the outermost folders, so a root inside a listed folder is already checked out.
+    const current = git(dir, ["sparse-checkout", "list"]).split("\n").map((s) => s.trim()).filter(Boolean);
+    if (roots.some((r) => !current.some((c) => r === c || r.startsWith(c + "/")))) {
       log(`Code: widening ${repo.name} checkout to ${roots.join(", ")}…`);
       git(dir, ["sparse-checkout", "set", "--cone", ...roots]);
     }
@@ -109,6 +110,11 @@ function sweepFiles(repoDir, repo, rel) {
 }
 
 /** Everything the keyword triangulation needs from one repo: its code/template files and every declared type name. */
+/** Every code and template file of a repo as { path, content } (read once per process). */
+export function codeFiles(repo, repoInfo) {
+  return sweepFiles(repoInfo.dir, repo, (f) => path.relative(repoInfo.dir, f).split(path.sep).join("/"));
+}
+
 export function codeVocabulary(repo, repoInfo) {
   const rel = (f) => path.relative(repoInfo.dir, f).split(path.sep).join("/");
   return { files: sweepFiles(repoInfo.dir, repo, rel), declared: [...sourceIndex(repoInfo.dir, repo, rel).declaredBy.keys()] };

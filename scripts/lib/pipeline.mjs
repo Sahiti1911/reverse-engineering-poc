@@ -5,6 +5,7 @@
 /** Every agent the orchestrator knows. `stage` null = the agent does the work itself (no script stage). */
 export const AGENTS = {
   "module-scout": { phase: "scope", stage: "scope", review: "scout", required: true },
+  "feature-mapper": { phase: "map", stage: "map", review: "map" },
   "requirements-analyst": { phase: "explore", stage: "requirements", review: "requirements", required: true },
   "code-analyst": { phase: "explore", stage: "code", review: "code" },
   "ui-explorer": { phase: "explore", stage: null, review: "ui" },
@@ -15,7 +16,7 @@ export const AGENTS = {
   reporter: { phase: "report", stage: "report", review: null },
 };
 
-export const PHASES = ["scope", "explore", "context", "design", "validate", "report"];
+export const PHASES = ["scope", "map", "explore", "context", "design", "validate", "report"];
 
 /**
  * config.pipeline → [{ phase, agents: [{ name, phase, stage, review }] }] in phase order.

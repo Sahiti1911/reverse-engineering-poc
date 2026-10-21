@@ -33,6 +33,7 @@ Options:
   --concurrency <n>              parallel Claude calls (default config/config.yaml)
   --no-code                      skip code-derived scenarios
   --refresh-zephyr               ignore the cached Zephyr export
+  --env <name>                   environment the map stage's UI sweep opens (default config/config.yaml)
   --force                        ignore cached Claude results (uses tokens again)
   --dry-run                      no Claude calls: deterministic stages + cached results only
   --out <file.xlsx>              workbook path (default: in the run folder)`;
@@ -41,7 +42,7 @@ const { values: args } = parseArgs({
   options: {
     profile: { type: "string" }, scope: { type: "string" }, since: { type: "string" }, limit: { type: "string" },
     keywords: { type: "string" }, remember: { type: "boolean" }, "extra-stories": { type: "string" }, stage: { type: "string" }, "run-dir": { type: "string" },
-    module: { type: "string" },
+    module: { type: "string" }, env: { type: "string" },
     concurrency: { type: "string" }, "no-code": { type: "boolean" }, "refresh-zephyr": { type: "boolean" },
     force: { type: "boolean" }, "dry-run": { type: "boolean" }, out: { type: "string" },
     "create-approved": { type: "string" }, yes: { type: "boolean" }, help: { type: "boolean", short: "h" },
@@ -63,7 +64,7 @@ if (args["create-approved"]) {
 if (!args.stage || args.stage === "scope") args.profile = profileName(args.profile);
 if (args.module && !args.scope) args.scope = `module:${args.module}`;
 
-const opts = { dryRun: args["dry-run"], force: args.force, concurrency: args.concurrency, noCode: args["no-code"], refreshZephyr: args["refresh-zephyr"] };
+const opts = { dryRun: args["dry-run"], force: args.force, concurrency: args.concurrency, noCode: args["no-code"], refreshZephyr: args["refresh-zephyr"], env: args.env };
 
 function sinceArg(profileName) {
   if (args.since !== "last-run") return args.since;
@@ -95,7 +96,7 @@ Done. ${ctx.stories.length} stories (${ctx.testable().length} testable), ${c.exp
 Tokens used: ${tok.total.total_tokens.toLocaleString("en-US")} (pipeline ${tok.pipeline.total_tokens.toLocaleString("en-US")}, agents ${tok.agents.total_tokens.toLocaleString("en-US")}; ${tok.total.calls - tok.total.reused} new call(s), ${tok.total.reused} from cache)
 Workbook: ${result.workbookPath}
 Summary:  ${result.summaryPath}
-Review the 9_Gaps sheet (Review decision column), then: node scripts/run.mjs --create-approved "${result.workbookPath}"`);
+Review the 10_Gaps sheet (Review decision column), then: node scripts/run.mjs --create-approved "${result.workbookPath}"`);
 }
 
 try {
@@ -137,7 +138,7 @@ try {
       console.log("No stories in scope — nothing to analyse.");
       process.exit(0);
     }
-    for (const stage of ["requirements", "code", "zephyr", "context", "draft", "validate"]) {
+    for (const stage of ["map", "requirements", "code", "zephyr", "context", "draft", "validate"]) {
       await STAGE_FUNCS[stage](ctx);
       ctx.save();
     }

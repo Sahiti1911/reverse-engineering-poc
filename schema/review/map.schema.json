@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "feature-mapper review: corrections to the feature map (one surface = one implementation of the feature)",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "surfaces": {
+      "type": "array",
+      "description": "Changes to surfaces the map stage found, by name.",
+      "items": {
+        "type": "object",
+        "required": ["name", "reasoning"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "label": { "type": "string", "description": "The name a tester sees, e.g. \"Devices\" for ADMIN_UNIT_EXPORT." },
+          "aliases": { "type": "array", "items": { "type": "string" }, "description": "Other names the page has in cases, stories and Confluence." },
+          "drop": { "type": "boolean", "description": "Not an implementation of this feature." },
+          "addCases": { "type": "array", "items": { "type": "string" }, "description": "Pool cases about this surface the stage did not assign." },
+          "removeCases": { "type": "array", "items": { "type": "string" } },
+          "addStories": { "type": "array", "items": { "type": "string" } },
+          "note": { "type": "string", "description": "Why a layer is missing (e.g. not migrated to the new frontend), how to reach the page, permissions needed." },
+          "reasoning": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "addSurfaces": {
+      "type": "array",
+      "description": "Implementations the registry does not list, with evidence.",
+      "items": {
+        "type": "object",
+        "required": ["name", "label", "evidence", "reasoning"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "label": { "type": "string" },
+          "evidence": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "File paths, routes, case keys or page titles." },
+          "reasoning": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "sharedBehaviours": {
+      "type": "array",
+      "description": "Behaviour every surface shares (the common engine), tested once, not per surface.",
+      "items": {
+        "type": "object",
+        "required": ["title", "detail", "sources", "reasoning"],
+        "additionalProperties": false,
+        "properties": {
+          "title": { "type": "string" },
+          "detail": { "type": "string" },
+          "sources": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "reasoning": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "notThis": {
+      "type": "array",
+      "description": "Items that look related but belong to another feature.",
+      "items": {
+        "type": "object",
+        "required": ["kind", "id", "reasoning"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": { "enum": ["surface", "case", "confluence"] },
+          "id": { "type": "string", "description": "Surface name, case key or Confluence page id." },
+          "reasoning": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

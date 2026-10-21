@@ -25,6 +25,39 @@
           "excludeStories": { "type": "array", "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*-\\d+$" }, "description": "Stories never analysed for this module (noise)." },
           "jql": { "type": "string", "description": "Optional full JQL that replaces the keyword search." },
           "uiRoutes": { "type": "array", "items": { "type": "string" }, "description": "Paths of the module's screens relative to the environment's uiBaseUrl (e.g. \"/admin/import-job\"). Without them the ui-explorer finds the route in the frontend code." },
+          "surfaces": {
+            "type": "object",
+            "description": "Cross-cutting features: how to find every separate implementation (surface) of the feature, e.g. each grid's export. The map stage lists them from the code and joins each one with the UI, Confluence, stories and Zephyr.",
+            "required": ["idSource"],
+            "additionalProperties": false,
+            "properties": {
+              "idSource": {
+                "type": "object",
+                "required": ["file", "pattern"],
+                "additionalProperties": false,
+                "description": "The one place that lists every surface, e.g. a backend enum. Each match of `pattern` is one surface.",
+                "properties": {
+                  "file": { "type": "string", "description": "Repo-relative path of the file, e.g. gtms-base/src/main/java/.../ExportTimedJobModul.java." },
+                  "pattern": { "type": "string", "description": "Regex with group 1 = the surface name used in the code (the join key across layers) and optional group 2 = the numeric id the UI sends, e.g. \"\\\\b([A-Z][A-Z0-9_]*_EXPORT)\\\\((\\\\d+)\\\\)\"." },
+                  "repo": { "type": "string", "description": "Repo name from profile.json; default: the first repo." }
+                }
+              },
+              "labelDrop": { "type": "array", "items": { "type": "string" }, "description": "Words dropped from a surface name to make its label, e.g. [\"EXPORT\"] turns ADMIN_UNIT_EXPORT into \"Admin unit\"." },
+              "ui": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "How the UI sweep finds and triggers the feature on a page. The triggered request is always recorded and aborted, never sent.",
+                "properties": {
+                  "requestPattern": { "type": "string", "description": "Regex on the request URL the feature sends; group 1 = the surface id, e.g. \"/rest/exportjob/export/(\\\\d+)$\"." },
+                  "trigger": { "type": "string", "description": "Regex (case-insensitive) on the accessible name of the button that starts the feature, e.g. \"^export\"." },
+                  "overflow": { "type": "string", "description": "Regex on the accessible name of a menu button that may hide the trigger, e.g. \"more actions|tools\"." },
+                  "confirm": { "type": "string", "description": "Regex on the accessible name of a dialog button that confirms the feature, e.g. \"^export$\"." },
+                  "routes": { "type": "array", "items": { "type": "string" }, "description": "Extra hash routes to visit besides the app's navigation, e.g. \"#/exportjob\"." }
+                }
+              },
+              "notThis": { "type": "array", "items": { "type": "string" }, "description": "Regexes (case-insensitive) for features that look similar but are not this one, e.g. \"gtfs\", \"siri\". Matching surfaces, Confluence pages and cases are listed as not this feature." }
+            }
+          },
           "notes": { "type": "string", "description": "Anything the agents should know about this module." }
         }
       }

@@ -17,10 +17,10 @@ description: Use when asked to find missing test cases / test coverage gaps for 
 - **A project with no profile**: follow `profiles/_template/README.md` first.
 
 ## Agent pipeline (config/config.yaml `pipeline`)
-module-scout → [requirements-analyst + code-analyst + ui-explorer + zephyr-explorer, in parallel] →
+module-scout → feature-mapper → [requirements-analyst + code-analyst + ui-explorer + zephyr-explorer, in parallel] →
 context-builder → test-designer → coverage-validator → reporter.
 The orchestrator runs each phase's script stages, then the phase's agents side by side. Each agent may write
-`review/<key>.json` and forwards its findings (`handoff/NN-<agent>.json`) to the later phases. The explorers'
+`review/<key>.json` and forwards its findings (`handoff/<agent>.json`) to the later phases. The explorers'
 reviews all merge in the context stage. Remove an agent from `pipeline` to switch that part off; the UI
 explorer needs `environments.<env>.uiBaseUrl` and, for `storage-state` login, `npm run ui-login` once. A failed
 optional explorer (code, UI, Zephyr) is reported and the run goes on. When the scout stops with `blocked`, show its question and
@@ -37,9 +37,9 @@ Read `runs/<profile>/latest-summary.md`. Report:
 Give the workbook path. Report tokens only, never money.
 
 ## Reading the workbook
-- `8_Test_Design` is the test suite designed from the module context, each case with Covered / Partial / Missing
+- `9_Test_Design` is the test suite designed from the module context, each case with Covered / Partial / Missing
   against the existing Zephyr cases and why it should be tested. Missing and Partial ones become gaps.
-- `9_Gaps` is the review list (`8_Gaps` or `6_Gaps` in older workbooks).
+- `10_Gaps` is the review list (`9_Gaps`, `8_Gaps` or `6_Gaps` in older workbooks).
 - `Unverified` means a case probably covers the scenario, but with Low confidence.
 - `Code-only`, `UI only` and `needs PO confirmation` scenarios describe current behaviour; confirm the behaviour is
   intended before approving.

@@ -8,8 +8,9 @@ import { TokenLog } from "./tokens.mjs";
 import { readJson, writeJson, nowIso } from "./util.mjs";
 import { exportZephyr } from "./zephyr.mjs";
 import { createJiraClient } from "./jira.mjs";
+import { resolvePipeline } from "./pipeline.mjs";
 
-export const STAGES = ["scope", "requirements", "code", "zephyr", "context", "draft", "validate", "report"];
+export const STAGES = ["scope", "map", "requirements", "code", "zephyr", "context", "draft", "validate", "report"];
 
 export class RunContext {
   constructor({ runDir, state, profile, cfg, opts = {}, freshTokens = false }) {
@@ -116,9 +117,20 @@ export class RunContext {
     return path.join(this.runDir, "review", `${agentKey}.json`);
   }
 
+  /**
+   * Agent handoffs in pipeline order. Files are handoff/<agent>.json (older runs: NN-<agent>.json); when both
+   * exist for one agent the unnumbered one is the newer.
+   */
   handoffs() {
     const dir = path.join(this.runDir, "handoff");
     if (!fs.existsSync(dir)) return [];
-    return fs.readdirSync(dir).filter((f) => f.endsWith(".json")).sort().map((f) => readJson(path.join(dir, f)));
+    const order = resolvePipeline(this.cfg).flatMap((p) => p.agents.map((x) => x.name));
+    const byAgent = new Map();
+    for (const f of fs.readdirSync(dir).filter((x) => x.endsWith(".json")).sort()) {
+      const name = f.replace(/\.json$/, "").replace(/^\d+-/, "");
+      if (!byAgent.has(name) || !/^\d+-/.test(f)) byAgent.set(name, readJson(path.join(dir, f)));
+    }
+    const rank = (n) => (order.includes(n) ? order.indexOf(n) : order.length);
+    return [...byAgent.entries()].sort((a, b) => rank(a[0]) - rank(b[0])).map(([, h]) => h);
   }
 }

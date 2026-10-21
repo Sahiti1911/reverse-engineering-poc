@@ -227,7 +227,7 @@ test("agent allowlists: own stage only, review file only, Zephyr read-only, UI b
   assert.ok(byName["context-builder"].includes("Edit(./runs/avl/x/review/*.json)"));
   assert.ok(!Object.values(byName).flat().some((t) => /create_test_case|update_test|link_test_case/.test(t)));
   assert.ok(!byName.reporter.some((t) => t.startsWith("Edit")));
-  for (const n of ["requirements-analyst", "code-analyst", "ui-explorer", "zephyr-explorer", "context-builder", "test-designer", "coverage-validator"]) {
+  for (const n of ["feature-mapper", "requirements-analyst", "code-analyst", "ui-explorer", "zephyr-explorer", "context-builder", "test-designer", "coverage-validator"]) {
     assert.ok(!byName[n].some((t) => t.includes("--stage")), n);
   }
   assert.ok(byName["ui-explorer"].includes("mcp__playwright__browser_click"));
@@ -247,8 +247,9 @@ test("agent allowlists: own stage only, review file only, Zephyr read-only, UI b
 test("config.yaml: the shipped pipeline is valid; bad pipelines are refused", () => {
   const cfg = loadRunConfig();
   const phases = resolvePipeline(cfg);
-  assert.deepEqual(phases.map((p) => p.phase), ["scope", "explore", "context", "design", "validate", "report"]);
-  assert.deepEqual(phases[1].agents.map((x) => x.name), ["requirements-analyst", "code-analyst", "ui-explorer", "zephyr-explorer"]);
+  assert.deepEqual(phases.map((p) => p.phase), ["scope", "map", "explore", "context", "design", "validate", "report"]);
+  assert.deepEqual(phases[1].agents.map((x) => x.name), ["feature-mapper"]);
+  assert.deepEqual(phases[2].agents.map((x) => x.name), ["requirements-analyst", "code-analyst", "ui-explorer", "zephyr-explorer"]);
   const base = (pipeline) => ({ pipeline });
   const ok = [{ phase: "scope", agents: ["module-scout"] }, { phase: "explore", agents: ["requirements-analyst"] }, { phase: "context", agents: ["context-builder"] }];
   assert.equal(resolvePipeline(base(ok)).length, 3);
@@ -406,7 +407,7 @@ const minimalRun = (overrides = {}) => ({
 test("buildWorkbook writes all sheets, prefills the review decision and reads back", async () => {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cov-")), "w.xlsx");
   const out = await buildWorkbook({ file, ...minimalRun() });
-  assert.deepEqual(out.sheets, ["Summary", "1_Module_Context", "2_Story_Triage", "3_Link_Check", "4_Expected_Scenarios", "5_UI_Exploration", "6_Zephyr_Cases", "7_Matching", "8_Test_Design", "9_Gaps", "10_Orphan_Zephyr", "11_Agents", "12_Agent_Reviews", "13_Run_Log", "14_Token_Usage"]);
+  assert.deepEqual(out.sheets, ["Summary", "1_Module_Context", "2_Feature_Map", "3_Story_Triage", "4_Link_Check", "5_Expected_Scenarios", "6_UI_Exploration", "7_Zephyr_Cases", "8_Matching", "9_Test_Design", "10_Gaps", "11_Orphan_Zephyr", "12_Agents", "13_Agent_Reviews", "14_Run_Log", "15_Token_Usage"]);
   const back = await readGapSheet(file);
   assert.equal(back.profileName, "avl");
   assert.equal(back.rows[0]["Review decision"], "Approve");
@@ -418,7 +419,7 @@ test("buildWorkbook refuses rows without reasoning", async () => {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cov-")), "w.xlsx");
   const run = minimalRun();
   run.stories[0].triage.reasoning = "";
-  await assert.rejects(buildWorkbook({ file, ...run }), /without reasoning[\s\S]*2_Story_Triage: AVLN-1/);
+  await assert.rejects(buildWorkbook({ file, ...run }), /without reasoning[\s\S]*3_Story_Triage: AVLN-1/);
 });
 
 test("readGapSheet still reads older workbooks whose review sheet is 6_Gaps", async () => {
@@ -732,7 +733,7 @@ test("run outputs: shared run header and file index; coverage.json carries resul
   const ui = { inventory: [{ id: "UI-001" }], observations: [], scenarios: [], blockedRequests: [], consoleErrors: [], screenshots: ["ui/UI-001_a.png"] };
   const cov = coverageJson({ run, files, counts: { gaps: 1 }, moduleContext: SAMPLE_CONTEXT, ui, stories: [r] });
   assert.equal(cov.version, OUTPUT_VERSION);
-  assert.deepEqual(Object.keys(cov), ["version", "run", "files", "counts", "moduleContext", "testDesign", "ui", "stories"]);
+  assert.deepEqual(Object.keys(cov), ["version", "run", "files", "counts", "moduleContext", "featureMap", "testDesign", "ui", "stories"]);
   assert.deepEqual(Object.keys(cov.stories[0]), ["key", "summary", "module", "testable", "dropped", "linkedCases", "scenarios", "verdicts", "gaps", "orphans"]);
   assert.deepEqual([cov.stories[0].linkedCases, cov.stories[0].orphans], [["QA-T1"], [{ key: "QA-T9", reasoning: "other feature" }]]);
   assert.equal(cov.ui.screenshots[0], "ui/UI-001_a.png");
@@ -823,13 +824,13 @@ test("buildWorkbook writes the designed suite and rejects designed cases without
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cov-"));
   const tc = { tcId: "TC-01", storyKey: "AVLN-1", title: "Export selected rows", whyNeeded: "R-04 needs it", basis: ["R-04"], scenarioIds: ["AVLN-1:S01"], flow: "main", type: "positive", steps: ["Select", "Export"], expected: "Only selected rows", check: { verdict: "Missing", matchedKeys: [], confidence: "High", missingAspects: "", reasoning: "No case opens the file." }, gapId: "GAP-AVLN-1-TC-01" };
   const out = await buildWorkbook({ file: path.join(dir, "a.xlsx"), ...minimalRun(), testDesign: { cases: [tc] } });
-  assert.ok(out.sheets.includes("8_Test_Design"));
+  assert.ok(out.sheets.includes("9_Test_Design"));
   const { default: ExcelJS } = await import("exceljs");
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(path.join(dir, "a.xlsx"));
-  const ws = wb.getWorksheet("8_Test_Design");
+  const ws = wb.getWorksheet("9_Test_Design");
   assert.deepEqual([ws.getCell(2, 1).value, ws.getCell(2, 11).value, ws.getCell(2, 16).value], ["TC-01", "Missing", "GAP-AVLN-1-TC-01"]);
-  await assert.rejects(buildWorkbook({ file: path.join(dir, "b.xlsx"), ...minimalRun(), testDesign: { cases: [{ ...tc, check: { ...tc.check, reasoning: "" } }] } }), /8_Test_Design: TC-01 has no reasoning/);
+  await assert.rejects(buildWorkbook({ file: path.join(dir, "b.xlsx"), ...minimalRun(), testDesign: { cases: [{ ...tc, check: { ...tc.check, reasoning: "" } }] } }), /9_Test_Design: TC-01 has no reasoning/);
 });
 
 test("test design: a designed case keeps a settled scenario verdict instead of being judged again", async () => {
@@ -844,4 +845,153 @@ test("test design: a designed case keeps a settled scenario verdict instead of b
   assert.deepEqual([missing.verdict, missing.confidence], ["Missing", "Medium"]);
   // Not settled: no scenarios, a Partial, a Covered that was not auto-accepted, mixed verdicts, or another story's scenario.
   for (const ids of [[], ["A:S4"], ["A:S5"], ["A:S1", "A:S3"], ["B:S1"], ["A:UNKNOWN"]]) assert.equal(inheritedCheck(tc(ids), matchById, storyOf), null, ids.join(","));
+});
+
+// ---------------------------------------------------------------- feature map (surfaces)
+const { parseIdSource, surfaceLabel, classifyLayer, findSurfaceFiles, dispatchTargets, followDispatch, notThisMatch, surfaceAliases, surfaceOfText, joinSurfaces } = await import("../scripts/lib/surfaces.mjs");
+const { pageIdsFromText, titleCql, classifyPage, sharedWords } = await import("../scripts/lib/confluence.mjs");
+const { sweepTargets, discoveredLinks, parseFeatureRequest, compareColumns } = await import("../scripts/lib/ui-sweep.mjs");
+const { applyMapReview } = await import("../scripts/lib/reviews.mjs");
+const { featureMapRows } = await import("../scripts/lib/workbook.mjs");
+
+const REPO = { legacyRoots: ["app/legacy"] };
+const ENUM = "enum M { NONE(0), EVENT_EXPORT(1), ADMIN_UNIT_EXPORT(6), GTFS_FEED_EXPORT(9), ADMIN_UNIT_EXPORT(6) }";
+
+test("surfaces: registry, labels, layers and the files that name each surface", () => {
+  const reg = parseIdSource(ENUM, "\\b([A-Z][A-Z0-9_]*_EXPORT)\\((\\d+)\\)");
+  assert.deepEqual(reg, [{ name: "EVENT_EXPORT", id: "1" }, { name: "ADMIN_UNIT_EXPORT", id: "6" }, { name: "GTFS_FEED_EXPORT", id: "9" }]);
+  assert.equal(surfaceLabel("ADMIN_UNIT_EXPORT", ["EXPORT"]), "Admin unit");
+  assert.equal(surfaceLabel("EXPORT", ["EXPORT"]), "Export");
+  assert.deepEqual(["b/X.java", "app/legacy/unit/unit-ctrl.js", "app/new/unit.ts", "a/readme.md"].map((p) => classifyLayer(p, REPO)), ["backend", "legacy", "frontend", "other"]);
+  const files = [
+    { path: "M.java", content: ENUM },
+    { path: "b/ExportHandler.java", content: "case ADMIN_UNIT_EXPORT:\n  return unit;\ncase EVENT_EXPORT:" },
+    { path: "app/legacy/unit/unit-ctrl.js", content: "x\nexportModul: ExportModul.ADMIN_UNIT_EXPORT" },
+    { path: "app/new/unit.ts", content: "exportModule: 'ADMIN_UNIT_EXPORT_V2'" },
+  ];
+  const found = findSurfaceFiles(files, reg.map((r) => r.name), { exclude: ["M.java"] });
+  assert.deepEqual(found.get("ADMIN_UNIT_EXPORT"), [{ path: "b/ExportHandler.java", line: 1 }, { path: "app/legacy/unit/unit-ctrl.js", line: 2 }]);
+  assert.deepEqual(found.get("GTFS_FEED_EXPORT"), []);
+  // A dispatcher's case branch leads to the class that implements the surface.
+  const sw = "switch (m) {\n case ADMIN_UNIT_EXPORT:\n  dto.g = getGroupInfo(dto, X.UNIT);\n  status = exportAdminUnitHandler.process(dto);\n  break;\n case ExportModul.EVENT_EXPORT:\n  status = exportEventHandler.process(dto);\n  break;\n default:\n  x();\n}\n";
+  assert.deepEqual(dispatchTargets(sw, "ADMIN_UNIT_EXPORT"), ["ExportAdminUnitHandler"]);
+  assert.deepEqual(dispatchTargets(sw, "EVENT_EXPORT"), ["ExportEventHandler"]);
+  assert.deepEqual(dispatchTargets(sw, "TRIP_EXPORT"), []);
+  const disp = followDispatch(new Map([["ADMIN_UNIT_EXPORT", [{ path: "b/ExportHandler.java", line: 2 }]]]), [{ path: "b/ExportHandler.java", content: sw }], new Map([["ExportAdminUnitHandler", ["b/h/ExportAdminUnitHandler.java"]]]));
+  assert.deepEqual(disp.get("ADMIN_UNIT_EXPORT").map((h) => h.path), ["b/ExportHandler.java", "b/h/ExportAdminUnitHandler.java"]);
+  assert.equal(notThisMatch("GTFS FEED EXPORT", ["\\bgtfs\\b"]), "\\bgtfs\\b");
+  assert.equal(notThisMatch("Admin unit", ["\\bgtfs\\b"]), null);
+});
+
+test("surfaces: aliases and the longest alias decide which surface a text is about", () => {
+  const unit = { name: "ADMIN_UNIT_EXPORT", label: "Admin unit", ui: [{ title: "Devices" }] };
+  const upd = { name: "ADMIN_DEVICE_UPDATE_EXPORT", label: "Admin device update", ui: [] };
+  const updT = { name: "ADMIN_DEVICE_UPDATE_TARGETS_EXPORT", label: "Admin device update targets", ui: [] };
+  const ev = { name: "EVENT_EXPORT", label: "Event", ui: [] };
+  assert.deepEqual(surfaceAliases(ev), ["event export"]); // a one-word label is too generic
+  assert.ok(surfaceAliases(unit).includes("devices"));
+  const all = [unit, upd, updT, ev];
+  assert.equal(surfaceOfText("AVL - Admin - Devices - Export to Excel", all), unit);
+  assert.equal(surfaceOfText("Export from Admin device update targets grid", all), updT);
+  assert.equal(surfaceOfText("Export file appears in the Exports list", all), null);
+});
+
+test("surfaces: joinSurfaces builds the evidence matrix, shared and not-this buckets, with reasoning", () => {
+  const registry = [{ name: "ADMIN_UNIT_EXPORT", id: "6" }, { name: "TRIP_EXPORT", id: "2" }, { name: "GTFS_FEED_EXPORT", id: "9" }];
+  const files = new Map([
+    ["ADMIN_UNIT_EXPORT", [{ path: "b/H.java" }, { path: "app/legacy/admin/unit/unit-ctrl.js" }, { path: "app/new/admin/unit/unit.ts" }]],
+    ["TRIP_EXPORT", [{ path: "b/H.java" }]],
+    ["GTFS_FEED_EXPORT", [{ path: "b/G.java" }]],
+  ]);
+  const map = joinSurfaces({
+    registry, files, repo: REPO, labelDrop: ["EXPORT"], notThis: ["\\bgtfs\\b"],
+    ui: [{ route: "#/admin/units", title: "Devices", trigger: true, requests: [{ id: "6" }], columnsMatch: false }, { route: "#/x", title: "X", trigger: true, requests: [] }, { route: "#/y", title: "Y", trigger: true, requests: [{ id: "77" }] }],
+    confluence: [{ id: "1", title: "Exports", text: "All grids export to CSV." }, { id: "2", title: "GTFS Static Export", text: "" }, { id: "3", title: "Devices", text: "ADMIN_UNIT_EXPORT columns" }],
+    stories: [{ key: "AVLN-1", summary: "QA: Devices", text: "", featurePath: "admin/unit" }],
+    cases: [{ key: "QA-T1", name: "AVL - Admin - Devices - Export" }, { key: "QA-T2", name: "Export job appears in Exports" }, { key: "QA-T3", name: "GTFS export" }],
+  });
+  assert.deepEqual(map.surfaces.map((s) => s.name), ["ADMIN_UNIT_EXPORT", "TRIP_EXPORT"]);
+  const unit = map.surfaces[0];
+  assert.deepEqual(unit.code, { backend: ["b/H.java"], legacy: ["app/legacy/admin/unit/unit-ctrl.js"], frontend: ["app/new/admin/unit/unit.ts"] });
+  assert.deepEqual([unit.ui[0].title, unit.cases, unit.stories, unit.confluence, unit.status], ["Devices", ["QA-T1"], ["AVLN-1"], ["3"], "complete"]);
+  assert.match(unit.reasoning, /exported columns differ/);
+  assert.deepEqual(map.surfaces[1].missing, ["code:legacy", "code:frontend", "ui", "zephyr"]);
+  assert.deepEqual([map.shared.cases, map.shared.confluence], [["QA-T2"], ["1"]]);
+  assert.deepEqual([map.notThis.surfaces.map((x) => x.name), map.notThis.cases.map((x) => x.key), map.notThis.confluence.map((x) => x.id)], [["GTFS_FEED_EXPORT"], ["QA-T3"], ["2"]]);
+  assert.deepEqual(map.unmatchedUi.map((u) => u.route), ["#/x", "#/y"]);
+  assert.ok(map.surfaces.every((s) => s.reasoning));
+  // Without a sweep the UI is not counted as missing.
+  assert.ok(!joinSurfaces({ registry, files, repo: REPO }).surfaces[0].missing.includes("ui"));
+});
+
+test("confluence: linked page ids, title CQL and page kinds", () => {
+  assert.deepEqual(pageIdsFromText('see <a href="https://x.atlassian.net/wiki/spaces/LA/pages/123/Export">x</a> and ?pageId=456 and /wiki/spaces/LA/pages/123'), ["123", "456"]);
+  assert.equal(titleCql(["grid export", 'csv "x"'], ["LA"]), 'type = page AND (title ~ "grid export" OR title ~ "csv  x") AND space in ("LA")');
+  assert.equal(titleCql([]), null);
+  assert.deepEqual(sharedWords(["grid export", "data export", "export to csv", "csv export", "exportformatter"]), ["export"]);
+  assert.deepEqual(sharedWords(["import job"]), []);
+  const conf = { titleExclude: ["passbolt"], changeHistoryPattern: "release notes?" };
+  assert.deepEqual(["Passbolt Recovery Kit", "V4.92.0 Release Notes", "Export Job Config"].map((t) => classifyPage(t, conf)), ["excluded", "change-history", "requirement"]);
+});
+
+test("UI sweep helpers: targets, captured request and column comparison", () => {
+  assert.deepEqual(sweepTargets([{ href: "#/a", text: " A " }, { href: "#/a", text: "again" }, { href: "http://x" }, { href: "#/b", text: "B" }], ["#/exportjob"], 2), [{ route: "#/exportjob", title: "" }, { route: "#/a", title: "A" }]);
+  // Tabs that are routes of their own join the queue; known routes, record ids and the root do not.
+  assert.deepEqual(discoveredLinks([{ href: "#/acc", text: "Overall" }, { href: "#/acc-rdv", text: " By RDV " }, { href: "#/acc-rdv?x=1", text: "again" }, { href: "#/units/123", text: "Bus 1" }, { href: "#/", text: "Home" }], ["#/acc"]), [{ href: "#/acc-rdv", text: "By RDV" }]);
+  const req = parseFeatureRequest("https://h/rest/exportjob/export/58", { exportName: "x", headers: [{ field: "a", displayName: "Name" }, { field: "b" }], selectedIds: [1, 2], usePredefinedHeaders: false }, "/rest/exportjob/export/(\\d+)$");
+  assert.deepEqual(req, { url: "/rest/exportjob/export/58", id: "58", columns: ["Name", "b"], fields: ["exportName", "headers", "selectedIds", "usePredefinedHeaders"], selectedIds: 2, predefined: false });
+  assert.equal(parseFeatureRequest("https://h/rest/other", null, "/export/(\\d+)$").id, null);
+  // Sort numbers on headers are ignored; export-only columns are informative (grids render the columns in view).
+  assert.deepEqual(compareColumns(["Name 2", "Destination"], ["name", "destination", "operator"]), { match: true, onlyInGrid: [], onlyInExport: ["operator"] });
+  assert.equal(compareColumns(["Name", "Type", "Secret"], ["name", "type"]).match, false);
+  assert.equal(compareColumns(["Name", "Secret"], ["name"]).match, false);
+  assert.equal(compareColumns(["Category", "Type", "Name"], ["eventCategory", "eventType", "name"]).match, null); // keys, not labels
+  assert.equal(compareColumns([], ["name"]).match, null);
+});
+
+test("feature map: the feature-mapper review is applied once, and the workbook rows carry reasoning", () => {
+  const { runDir, ctx } = tempRun([]);
+  const state = JSON.parse(fs.readFileSync(path.join(runDir, "state.json"), "utf8"));
+  state.featureMap = {
+    surfaces: [
+      { name: "ADMIN_UNIT_EXPORT", id: "6", label: "Admin unit", code: { backend: ["b/H.java"], legacy: [], frontend: [] }, ui: [], confluence: [], stories: [], cases: [], missing: ["code:legacy", "code:frontend", "zephyr"], status: "missing", reasoning: "r" },
+      { name: "DEAD_EXPORT", id: "7", label: "Dead", code: { backend: [], legacy: [], frontend: [] }, ui: [], confluence: [], stories: [], cases: ["QA-T5"], missing: [], status: "complete", reasoning: "r" },
+    ],
+    shared: { cases: ["QA-T1", "QA-T2"], confluence: ["9"] }, notThis: { surfaces: [], cases: [], confluence: [] }, unmatchedUi: [], confluence: [{ id: "9", title: "Exports" }], sharedBehaviours: [],
+  };
+  fs.writeFileSync(path.join(runDir, "state.json"), JSON.stringify(state));
+  fs.writeFileSync(path.join(runDir, "review", "map.json"), JSON.stringify({
+    surfaces: [{ name: "ADMIN_UNIT_EXPORT", label: "Devices", aliases: ["units"], addCases: ["QA-T1"], note: "legacy only", reasoning: "QA-T1 exports the Devices grid" }, { name: "DEAD_EXPORT", drop: true, reasoning: "no frontend calls it" }],
+    addSurfaces: [{ name: "PBX_NUMBERS_EXPORT", label: "PBX numbers", evidence: ["export-job-page.component.ts"], reasoning: "special export" }],
+    sharedBehaviours: [{ title: "Exports list", detail: "Every export job shows in #/exportjob", sources: ["QA-T2"], reasoning: "common engine" }],
+    notThis: [{ kind: "case", id: "QA-T2", reasoning: "tests the import" }],
+  }));
+  for (let i = 0; i < 2; i++) {
+    const c = ctx();
+    applyMapReview(c);
+    c.save();
+  }
+  const m = JSON.parse(fs.readFileSync(path.join(runDir, "state.json"), "utf8")).featureMap;
+  const unit = m.surfaces.find((s) => s.name === "ADMIN_UNIT_EXPORT");
+  assert.deepEqual([unit.label, unit.aliases, unit.cases, unit.note, unit.status], ["Devices", ["units"], ["QA-T1"], "legacy only", "missing: code:legacy, code:frontend"]);
+  assert.match(unit.reasoning, /Agent feature-mapper: QA-T1 exports the Devices grid/);
+  assert.deepEqual(m.surfaces.map((s) => s.name), ["ADMIN_UNIT_EXPORT", "PBX_NUMBERS_EXPORT"]);
+  assert.deepEqual([m.notThis.surfaces.map((x) => x.name), m.notThis.cases.map((x) => x.key)], [["DEAD_EXPORT"], ["QA-T2"]]);
+  assert.deepEqual(m.shared.cases, ["QA-T5"]);
+  assert.deepEqual(m.sharedBehaviours.map((b) => b.id), ["SB-01"]);
+  const rows = featureMapRows(m);
+  assert.deepEqual(rows.map((r) => r.kind), ["surface", "surface", "shared", "shared behaviour", "not this feature", "not this feature"]);
+  assert.ok(rows.every((r) => r.reasoning));
+  assert.deepEqual(featureMapRows(null), []);
+});
+
+test("handoffs: one per agent in pipeline order; an unnumbered file replaces an older numbered one", () => {
+  const { runDir, ctx } = tempRun([]);
+  fs.mkdirSync(path.join(runDir, "handoff"));
+  const w = (f, agent, status) => fs.writeFileSync(path.join(runDir, "handoff", f), JSON.stringify({ agent, status }));
+  w("05-context-builder.json", "context-builder", "old");
+  w("01-module-scout.json", "module-scout", "ok");
+  w("context-builder.json", "context-builder", "ok");
+  w("feature-mapper.json", "feature-mapper", "ok");
+  assert.deepEqual(ctx().handoffs().map((h) => `${h.agent}:${h.status}`), ["module-scout:ok", "feature-mapper:ok", "context-builder:ok"]);
 });

@@ -47,6 +47,10 @@ scope:
 pipeline:
   - phase: scope
     agents: [module-scout]
+  # Cross-cutting modules (modules.json `surfaces`): the map stage lists every implementation of the feature
+  # (code registry, UI sweep, Confluence, stories, the whole Zephyr pool), the feature-mapper checks it.
+  - phase: map
+    agents: [feature-mapper]
   - phase: explore
     agents: [requirements-analyst, code-analyst, ui-explorer, zephyr-explorer]
   - phase: context
@@ -82,6 +86,14 @@ agents:
     maxPages: 8
     headless: true
     playwrightMcp: "@playwright/mcp@0.0.83"
+    # UI sweep of the map stage (a Playwright script, 0 tokens): every page of the app's navigation, the
+    # feature's trigger clicked, its request recorded and always aborted. Same origin, session and write block.
+    sweep:
+      enabled: true
+      maxPages: 200       # navigation pages plus the tabs and sub-pages they link to
+      pageTimeoutMs: 30000
+      gridWaitMs: 8000
+      settleMs: 1500
   coverage-validator:
     # Rejected drafts go back to the test-designer this many times before the report.
     maxRounds: 1
@@ -91,7 +103,7 @@ claude:
   bin: auto
   timeoutMs: 900000
   retries: 1
-  maxTokensPerRun: 3000000
+  maxTokensPerRun: 6000000   # a full cross-cutting run (every surface) needs ~5-6M; re-runs are mostly cache hits
 
 models:
   triage: claude-haiku-5-5

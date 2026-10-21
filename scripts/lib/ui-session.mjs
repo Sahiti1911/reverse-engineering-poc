@@ -6,7 +6,7 @@ import path from "node:path";
 import dotenv from "dotenv";
 import { ROOT } from "./config.mjs";
 
-async function launch(env, headless) {
+export async function launch(env, headless) {
   const pw = await import("playwright-core");
   const b = env.browser ?? "chromium";
   if (b === "firefox") return pw.firefox.launch({ headless });

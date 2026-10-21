@@ -94,6 +94,19 @@
         }
       }
     },
+    "confluence": {
+      "type": "object",
+      "description": "Optional. Confluence pages as a requirements source (same Atlassian site and token as Jira, under /wiki). Pages are found by title on the module keywords and by links from the in-scope stories.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "description": "Default true when this block exists." },
+        "spaces": { "type": "array", "items": { "type": "string" }, "description": "Space keys to search; [] = all spaces." },
+        "titleExclude": { "type": "array", "items": { "type": "string" }, "description": "Regexes (case-insensitive) on page titles that are never requirements, e.g. \"passbolt\"." },
+        "changeHistoryPattern": { "type": "string", "description": "Regex (case-insensitive) on page titles that are change history only, e.g. \"release notes\". Such pages are listed, not read as requirements." },
+        "maxPages": { "type": "integer", "minimum": 1, "description": "Most pages read per module (default 25)." },
+        "maxCharsPerPage": { "type": "integer", "minimum": 1000, "description": "Page text kept per page (default 20000)." }
+      }
+    },
     "modules": {
       "type": "object",
       "description": "Optional per-module hints. Key = module path (as captured by featurePathPattern).",
